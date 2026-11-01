@@ -23,6 +23,18 @@ jobs:
       - name: Build and run tests
         run: ./mvnw -B verify
 
+      # Integration tests skip themselves when Docker isn't usable (handy on laptops). In CI that would
+      # hide them entirely, so any skipped test fails the build here.
+      - name: Fail if any test was skipped
+        run: |
+          skipped=$(grep -hoE '<testsuite [^>]*skipped="[0-9]+"' target/surefire-reports/TEST-*.xml \
+            | grep -oE 'skipped="[0-9]+"' | grep -oE '[0-9]+' | awk '{ s += $1 } END { print s + 0 }')
+          echo "Skipped tests: $skipped"
+          if [ "$skipped" -ne 0 ]; then
+            grep -lE 'skipped="[1-9]' target/surefire-reports/TEST-*.xml
+            exit 1
+          fi
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

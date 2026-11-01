@@ -28,6 +28,9 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Boot 3.4.4 pins 1.20.6, which speaks Docker API 1.32; current Docker Engines (e.g. on GitHub
+		     runners) require 1.40+, so Testcontainers could not connect and every integration test was skipped -->
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
 	<dependencies>
 		<!-- JPA -->
