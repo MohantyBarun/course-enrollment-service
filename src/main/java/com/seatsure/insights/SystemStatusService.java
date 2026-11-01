@@ -112,7 +112,7 @@ public class SystemStatusService {
 
     public Snapshot snapshot() {
         return new Snapshot(Instant.now(), infrastructure(), http(), caches(), outbox(), rateLimits(), breakers(),
-                List.of(operation("auth.login", "Logins"), operation("booking.create", "Bookings")), jvm());
+                List.of(operation("auth.login", "Logins"), operation("hold.create", "Seat holds")), jvm());
     }
 
     Infrastructure infrastructure() {
