@@ -8,8 +8,8 @@
 		<version>3.4.4</version>
 		<relativePath/>
 	</parent>
-	<groupId>com.student</groupId>
-	<artifactId>StudentService</artifactId>
+	<groupId>com.seatsure</groupId>
+	<artifactId>seatsure</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name/>
 	<description/>
@@ -226,10 +226,10 @@
 				<configuration>
 					<excludes>
 						<!-- Plain data holders and bootstrap code carry no logic worth measuring -->
-						<exclude>com/student/studentservice/StudentServiceApplication.class</exclude>
-						<exclude>com/student/studentservice/entity/**</exclude>
-						<exclude>com/student/studentservice/dto/**</exclude>
-						<exclude>com/student/studentservice/config/DataSeeder.class</exclude>
+						<exclude>com/seatsure/SeatSureApplication.class</exclude>
+						<exclude>com/seatsure/entity/**</exclude>
+						<exclude>com/seatsure/dto/**</exclude>
+						<exclude>com/seatsure/config/DataSeeder.class</exclude>
 					</excludes>
 				</configuration>
 				<executions>
