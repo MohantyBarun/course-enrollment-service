@@ -3,8 +3,8 @@
  * Trade-off: tokens are readable by JavaScript, so XSS must be prevented (React escapes output
  * by default and we never inject raw HTML). httpOnly cookies would need backend changes.
  */
-const ACCESS_KEY = 'sms.accessToken';
-const REFRESH_KEY = 'sms.refreshToken';
+const ACCESS_KEY = 'seatsure.accessToken';
+const REFRESH_KEY = 'seatsure.refreshToken';
 
 export interface Tokens {
   accessToken: string;
@@ -20,9 +20,6 @@ export const tokenStore = {
   set(tokens: Tokens) {
     localStorage.setItem(ACCESS_KEY, tokens.accessToken);
     localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
-  },
-  setAccessToken(accessToken: string) {
-    localStorage.setItem(ACCESS_KEY, accessToken);
   },
   clear() {
     localStorage.removeItem(ACCESS_KEY);

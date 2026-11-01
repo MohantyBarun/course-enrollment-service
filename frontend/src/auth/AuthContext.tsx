@@ -1,59 +1,61 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { demoApi } from '../api/academics';
-import { authApi } from '../api/auth';
-import { forceRefresh, onSessionExpired } from '../api/client';
-import type { LoginResponse, Role } from '../api/types';
+import { onSessionExpired } from '../api/client';
+import { authApi } from '../api/endpoints';
+import type { Role, TokenResponse } from '../api/types';
 import { decodeJwt } from '../lib/jwt';
 import { tokenStore } from '../lib/tokens';
 
 export interface Session {
   email: string;
+  name: string;
   role: Role;
-  /** True while the user is on a temporary password; the API only allows change-password. */
-  mustChangePassword: boolean;
 }
 
 interface AuthContextValue {
   session: Session | null;
   isAdmin: boolean;
   login: (email: string, password: string) => Promise<Session>;
+  register: (form: { name: string; email: string; phone: string; password: string }) => Promise<Session>;
   /** Passwordless sign-in to the demo accounts (when the backend has demo mode on). */
-  loginAsDemo: (role: 'ADMIN' | 'STUDENT') => Promise<Session>;
+  loginAsDemo: (role: 'ADMIN' | 'CUSTOMER') => Promise<Session>;
   logout: () => Promise<void>;
-  changePassword: (oldPassword: string, newPassword: string, confirmNewPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const NAME_KEY = 'seatsure.name';
 
-function sessionFromToken(accessToken: string | undefined): Session | null {
-  if (!accessToken) return null;
-  const claims = decodeJwt(accessToken);
+function storedSession(): Session | null {
+  const tokens = tokenStore.get();
+  if (!tokens) return null;
+  const claims = decodeJwt(tokens.accessToken);
   if (!claims?.sub || !claims.role) return null;
-  return { email: claims.sub, role: claims.role, mustChangePassword: Boolean(claims.pwdChangeRequired) };
+  return { email: claims.sub, role: claims.role, name: localStorage.getItem(NAME_KEY) ?? claims.sub.split('@')[0] };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // Restore from storage. The access token may be expired; the API client refreshes it when needed.
-  const [session, setSession] = useState<Session | null>(() => sessionFromToken(tokenStore.get()?.accessToken));
+  // The access token may be expired; the API client refreshes it when it's next needed.
+  const [session, setSession] = useState<Session | null>(storedSession);
 
   useEffect(() => onSessionExpired(() => setSession(null)), []);
 
-  const start = useCallback((response: LoginResponse) => {
+  const start = useCallback((response: TokenResponse) => {
     tokenStore.set({ accessToken: response.accessToken, refreshToken: response.refreshToken });
-    const next = sessionFromToken(response.accessToken)!;
+    localStorage.setItem(NAME_KEY, response.user.name);
+    const next: Session = { email: response.user.email, name: response.user.name, role: response.user.role };
     setSession(next);
     return next;
   }, []);
 
-  const login = useCallback(
-    async (email: string, password: string) => start(await authApi.login(email, password)), [start]);
-
-  const loginAsDemo = useCallback(
-    async (role: 'ADMIN' | 'STUDENT') => start(await demoApi.login(role)), [start]);
+  const login = useCallback(async (email: string, password: string) => start(await authApi.login(email, password)), [start]);
+  const register = useCallback(
+    async (form: { name: string; email: string; phone: string; password: string }) => start(await authApi.register(form)),
+    [start]);
+  const loginAsDemo = useCallback(async (role: 'ADMIN' | 'CUSTOMER') => start(await authApi.demoLogin(role)), [start]);
 
   const logout = useCallback(async () => {
     const tokens = tokenStore.get();
     tokenStore.clear();
+    localStorage.removeItem(NAME_KEY);
     setSession(null);
     if (tokens) {
       // Revoke server-side; the local sign-out already happened, so ignore failures.
@@ -61,23 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const changePassword = useCallback(async (oldPassword: string, newPassword: string, confirm: string) => {
-    await authApi.changePassword(oldPassword, newPassword, confirm);
-    // The current access token still says "password change required"; swap it for a full one.
-    const accessToken = await forceRefresh();
-    setSession(sessionFromToken(accessToken));
-  }, []);
-
   const value = useMemo<AuthContextValue>(
-    () => ({
-      session,
-      isAdmin: session?.role === 'ROLE_ADMIN' || session?.role === 'ROLE_SUPER_ADMIN',
-      login,
-      loginAsDemo,
-      logout,
-      changePassword,
-    }),
-    [session, login, loginAsDemo, logout, changePassword],
+    () => ({ session, isAdmin: session?.role === 'ROLE_ADMIN', login, register, loginAsDemo, logout }),
+    [session, login, register, loginAsDemo, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -89,7 +77,7 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
-/** Where a signed-in user belongs by default. */
+/** Where a signed-in user lands by default. */
 export function homePathFor(session: Session): string {
-  return session.mustChangePassword ? '/change-password' : '/dashboard';
+  return session.role === 'ROLE_ADMIN' ? '/admin' : '/';
 }

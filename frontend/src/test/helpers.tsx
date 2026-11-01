@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { vi } from 'vitest';
 import { AuthProvider } from '../auth/AuthContext';
+import { CityProvider } from '../hooks/useCity';
 
 const b64url = (obj: object) =>
   btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -12,14 +13,18 @@ export function fakeJwt(claims: Record<string, unknown> = {}, expiresInSeconds =
   const now = Math.floor(Date.now() / 1000);
   return [
     b64url({ alg: 'HS512' }),
-    b64url({ sub: 'admin@x.com', role: 'ROLE_ADMIN', type: 'ACCESS', iat: now, exp: now + expiresInSeconds, ...claims }),
+    b64url({ sub: 'customer@x.com', uid: 7, role: 'ROLE_CUSTOMER', iat: now, exp: now + expiresInSeconds, ...claims }),
     'signature',
   ].join('.');
 }
 
+export function signInAsAdmin() {
+  signIn({ sub: 'admin@x.com', role: 'ROLE_ADMIN' });
+}
+
 export function signIn(claims: Record<string, unknown> = {}, expiresInSeconds = 900) {
-  localStorage.setItem('sms.accessToken', fakeJwt(claims, expiresInSeconds));
-  localStorage.setItem('sms.refreshToken', 'refresh-token');
+  localStorage.setItem('seatsure.accessToken', fakeJwt(claims, expiresInSeconds));
+  localStorage.setItem('seatsure.refreshToken', 'refresh-token');
 }
 
 export function jsonResponse(body: unknown, status = 200): Response {
@@ -39,10 +44,12 @@ export function renderAt(path: string, routes: ReactElement) {
   return render(
     <MemoryRouter initialEntries={[path]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
-        <Routes>
-          {routes}
-          <Route path="/login" element={<p>LOGIN PAGE</p>} />
-        </Routes>
+        <CityProvider>
+          <Routes>
+            {routes}
+            <Route path="/login" element={<p>LOGIN PAGE</p>} />
+          </Routes>
+        </CityProvider>
       </AuthProvider>
     </MemoryRouter>,
   );
