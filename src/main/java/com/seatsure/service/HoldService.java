@@ -8,6 +8,7 @@ import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.ConflictException;
 import com.seatsure.exception.ResourceNotFoundException;
 import com.seatsure.exception.SeatsUnavailableException;
+import com.seatsure.realtime.SeatEvents;
 import com.seatsure.repository.*;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -47,6 +48,7 @@ public class HoldService {
     private final UserRepository users;
     private final Pricing pricing;
     private final WaitlistService waitlist;
+    private final SeatEvents seatEvents;
     private final Clock clock;
     private final Duration ttl;
     private final TransactionTemplate tx;
@@ -54,6 +56,7 @@ public class HoldService {
 
     public HoldService(ShowRepository shows, ShowSeatRepository showSeats, SeatHoldRepository holds,
                        PaymentRepository payments, UserRepository users, Pricing pricing, WaitlistService waitlist,
+                       SeatEvents seatEvents,
                        Clock clock, @Value("${app.holds.ttl:PT10M}") Duration ttl,
                        PlatformTransactionManager transactionManager, MeterRegistry meters) {
         this.shows = shows;
@@ -63,6 +66,7 @@ public class HoldService {
         this.users = users;
         this.pricing = pricing;
         this.waitlist = waitlist;
+        this.seatEvents = seatEvents;
         this.clock = clock;
         this.ttl = ttl;
         this.tx = new TransactionTemplate(transactionManager);
@@ -125,6 +129,7 @@ public class HoldService {
         hold.setConvenienceFeePaise(quote.feePaise());
         holds.save(hold);
         wanted.forEach(ss -> ss.hold(hold));
+        seatEvents.seatsChanged(showId, wanted); // broadcast on commit
         log.info("Hold {} created: {} seat(s) of show {} until {}", hold.getId(), wanted.size(), showId, hold.getExpiresAt());
         return view(hold, wanted, quote, null);
     }

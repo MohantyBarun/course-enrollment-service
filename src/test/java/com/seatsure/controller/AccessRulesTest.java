@@ -5,6 +5,7 @@ import com.seatsure.dto.CheckoutDtos.HoldView;
 import com.seatsure.entity.SeatHold;
 import com.seatsure.entity.ShowFormat;
 import com.seatsure.payment.PaymentService;
+import com.seatsure.realtime.SeatStreams;
 import com.seatsure.payment.PaymentWebhookService;
 import com.seatsure.payment.mock.MockPaymentGateway;
 import com.seatsure.service.HoldService;
@@ -58,12 +59,15 @@ class AccessRulesTest {
     @MockitoBean private MockPaymentGateway mockGateway;
     @MockitoBean private PaymentWebhookService webhooks;
     @MockitoBean private WaitlistService waitlist;
+    @MockitoBean private SeatStreams seatStreams;
 
     @Test
     void browsing_isPublic() throws Exception {
         mockMvc.perform(get("/cities")).andExpect(status().isOk());
         mockMvc.perform(get("/movies/1/showtimes").param("cityId", "1")).andExpect(status().isOk());
         mockMvc.perform(get("/shows/1/seats")).andExpect(status().isOk());
+        when(seatStreams.subscribe(1L)).thenReturn(new org.springframework.web.servlet.mvc.method.annotation.SseEmitter());
+        mockMvc.perform(get("/shows/1/seats/stream")).andExpect(status().isOk());
     }
 
     @Test

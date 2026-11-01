@@ -49,7 +49,7 @@
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
+			<!-- compile scope: the live seat map uses the driver's LISTEN/NOTIFY API (PGConnection) -->
 		</dependency>
 
 		<!-- Lombok -->

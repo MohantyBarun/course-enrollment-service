@@ -63,7 +63,7 @@ public class AppConfig {
                                 "/auth/demo", "/auth/demo-login").permitAll()
                         // Browsing is public: you only need an account to book
                         .requestMatchers(HttpMethod.GET, "/cities", "/cities/*/home", "/movies/*",
-                                "/movies/*/showtimes", "/shows/*", "/shows/*/seats").permitAll()
+                                "/movies/*/showtimes", "/shows/*", "/shows/*/seats", "/shows/*/seats/stream").permitAll()
                         // Called by the payment gateway, authenticated by its HMAC signature instead of a JWT
                         .requestMatchers(HttpMethod.POST, "/webhooks/payments").permitAll()
                         // Checkout and your own bookings: customers only

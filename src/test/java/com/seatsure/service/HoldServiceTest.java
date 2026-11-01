@@ -4,6 +4,7 @@ import com.seatsure.dto.CheckoutDtos.HoldView;
 import com.seatsure.entity.*;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.SeatsUnavailableException;
+import com.seatsure.realtime.SeatEvents;
 import com.seatsure.repository.*;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +47,7 @@ class HoldServiceTest {
     @Mock private PaymentRepository payments;
     @Mock private UserRepository users;
     @Mock private WaitlistService waitlist;
+    @Mock private SeatEvents seatEvents;
     @Mock private PlatformTransactionManager transactionManager;
 
     private HoldService service;
@@ -53,7 +55,7 @@ class HoldServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new HoldService(shows, showSeats, holds, payments, users, new Pricing(prices, 2500), waitlist,
+        service = new HoldService(shows, showSeats, holds, payments, users, new Pricing(prices, 2500), waitlist, seatEvents,
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10), transactionManager, new SimpleMeterRegistry());
 
         Screen screen = new Screen(new Cinema(new City("Pune", "Maharashtra"), "Starlight", "Somewhere"), "Audi 1");
@@ -101,6 +103,7 @@ class HoldServiceTest {
         assertThat(a.getStatus()).isEqualTo(ShowSeatStatus.HELD);
         assertThat(a.getHold()).isSameAs(b.getHold()).isNotNull();
         verify(holds).save(any(SeatHold.class));
+        verify(seatEvents).seatsChanged(eq(5L), argThat(seats -> seats.size() == 2));
     }
 
     @Test
@@ -115,6 +118,7 @@ class HoldServiceTest {
                         e -> assertThat(e.getSeatIds()).containsExactly(11L));
         assertThat(free.getStatus()).isEqualTo(ShowSeatStatus.AVAILABLE);
         verify(holds, never()).save(any());
+        verifyNoInteractions(seatEvents);
     }
 
     @Test
