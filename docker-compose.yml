@@ -1,0 +1,44 @@
+# Full local stack: PostgreSQL, Redis, RabbitMQ, Jaeger (traces), Prometheus and Grafana.
+#   docker compose up -d
+#   then run the app with the environment below (see README, "Run the full stack locally").
+# UIs: RabbitMQ http://localhost:15672 (guest/guest), Jaeger http://localhost:16686,
+#      Prometheus http://localhost:9090, Grafana http://localhost:3001 (admin/admin)
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: studentdb
+      POSTGRES_USER: student
+      POSTGRES_PASSWORD: student
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports: ["5672:5672", "15672:15672"]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686", "4318:4318"]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes: [./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes: [./ops/grafana/provisioning:/etc/grafana/provisioning:ro]
+    ports: ["3001:3000"]
+
+volumes:
+  pgdata:

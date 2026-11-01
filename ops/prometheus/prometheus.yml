@@ -1,0 +1,12 @@
+# Scrapes the app running on the host (./mvnw spring-boot:run) with METRICS_PASSWORD=local-metrics
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: student-service
+    metrics_path: /actuator/prometheus
+    basic_auth:
+      username: metrics
+      password: local-metrics
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
