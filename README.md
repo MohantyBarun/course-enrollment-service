@@ -1,6 +1,6 @@
 # 🎬 SeatSure
 
-[![CI](https://github.com/MohantyBarun/course-enrollment-service/actions/workflows/ci.yml/badge.svg)](https://github.com/MohantyBarun/course-enrollment-service/actions/workflows/ci.yml)
+[![CI](https://github.com/MohantyBarun/seatsure/actions/workflows/ci.yml/badge.svg)](https://github.com/MohantyBarun/seatsure/actions/workflows/ci.yml)
 
 A movie ticket booking platform: a **Spring Boot** API and a **React + TypeScript** frontend, deployed on free-tier cloud services.
 
