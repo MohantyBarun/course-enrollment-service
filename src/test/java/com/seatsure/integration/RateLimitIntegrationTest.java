@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @FullAppIntegrationTest
 class RateLimitIntegrationTest {
 
-    private static final String BODY = "{\"email\":\"nobody@college.test\",\"password\":\"Wrong@123\"}";
+    private static final String BODY = "{\"email\":\"nobody@seatsure.test\",\"password\":\"Wrong@123\"}";
 
     @Autowired private MockMvc mockMvc;
 
@@ -42,6 +42,6 @@ class RateLimitIntegrationTest {
                 .andExpect(header().exists("Retry-After"));
         mockMvc.perform(post("/auth/login").with(from("203.0.113.8"))
                         .contentType(MediaType.APPLICATION_JSON).content(BODY))
-                .andExpect(status().isNotFound()); // unknown account, but not rate limited
+                .andExpect(status().isUnauthorized()); // not rate limited: the usual answer for an unknown account
     }
 }
