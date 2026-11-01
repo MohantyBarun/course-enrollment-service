@@ -6,7 +6,7 @@ A movie ticket booking platform: a **Spring Boot** API and a **React + TypeScrip
 
 | | Live |
 |---|---|
-| 🍿 **App** | **[student-management-system-three-jet.vercel.app](https://student-management-system-three-jet.vercel.app)** |
+| 🍿 **App** | **[seatsure-tickets.vercel.app](https://seatsure-tickets.vercel.app)** |
 | 📖 **API docs** | [Swagger UI](https://student-service-w3vr.onrender.com/swagger-ui.html) |
 
 > Hosted on free tiers: the backend sleeps when idle, so the first request can take up to a minute.
