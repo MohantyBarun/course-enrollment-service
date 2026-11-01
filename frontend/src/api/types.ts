@@ -1,46 +1,213 @@
-// Mirrors the Spring Boot DTOs
+/** Mirrors the backend DTOs (com.seatsure.dto). Amounts are in paise; instants are ISO-8601 UTC strings. */
 
-export type Role = 'ROLE_ADMIN' | 'ROLE_SUPER_ADMIN' | 'ROLE_STUDENT';
+export type Role = 'ROLE_CUSTOMER' | 'ROLE_ADMIN';
+export type Certificate = 'U' | 'UA' | 'A';
+export type ShowFormat = '2D' | '3D' | 'IMAX';
+export type SeatCategory = 'RECLINER' | 'PRIME' | 'CLASSIC';
+export type SeatStatus = 'AVAILABLE' | 'HELD' | 'BOOKED';
+export type Availability = 'AVAILABLE' | 'FILLING_FAST' | 'SOLD_OUT';
 
-export interface LoginResponse {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
-  role: Role;
-  email: string;
-  isFirstTimeLogin: boolean;
-}
+// ------------------------------------------------------------------ auth
 
-export interface RefreshResponse {
-  accessToken: string;
-}
-
-export interface Student {
+export interface UserView {
   id: number;
   name: string;
   email: string;
-  department: string;
-  branch: string;
-  dateOfBirth: string; // ISO date (yyyy-mm-dd)
-  presentAddress: string | null;
-  permanentAddress: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  /** Only present in the response to creating a student. */
-  temporaryPassword?: string;
+  phone: string | null;
+  role: Role;
 }
 
-export interface StudentRequest {
+/** Returned by register, login, demo login and refresh. The refresh token rotates on every use. */
+export interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  user: UserView;
+}
+
+// ------------------------------------------------------------------ browsing
+
+export interface City {
+  id: number;
   name: string;
-  email: string;
-  department: string;
-  branch: string;
-  dateOfBirth: string;
-  presentAddress?: string;
-  permanentAddress?: string;
+  state: string;
 }
 
-export interface Page<T> {
+export interface MovieCard {
+  id: number;
+  title: string;
+  language: string;
+  certificate: Certificate;
+  genres: string[];
+  durationMinutes: number;
+  /** yyyy-mm-dd */
+  releaseDate: string;
+  posterUrl: string | null;
+}
+
+export interface MovieDetail extends MovieCard {
+  synopsis: string;
+}
+
+export interface Home {
+  city: City;
+  nowShowing: MovieCard[];
+  comingSoon: MovieCard[];
+}
+
+export interface ShowtimeView {
+  showId: number;
+  startsAt: string;
+  format: ShowFormat;
+  screenName: string;
+  availability: Availability;
+  seatsLeft: number;
+  minPricePaise: number;
+  maxPricePaise: number;
+}
+
+export interface CinemaShowtimes {
+  cinemaId: number;
+  cinemaName: string;
+  address: string;
+  shows: ShowtimeView[];
+}
+
+export interface Showtimes {
+  movie: MovieCard;
+  cityId: number;
+  date: string | null;
+  availableDates: string[];
+  cinemas: CinemaShowtimes[];
+}
+
+export interface PriceView {
+  category: SeatCategory;
+  pricePaise: number;
+}
+
+export interface ShowDetail {
+  showId: number;
+  movie: MovieCard;
+  cinema: { id: number; name: string; address: string; city: string };
+  screenName: string;
+  startsAt: string;
+  endsAt: string;
+  format: ShowFormat;
+  status: 'SCHEDULED' | 'CANCELLED';
+  bookable: boolean;
+  prices: PriceView[];
+}
+
+export interface SeatView {
+  id: number;
+  number: number;
+  /** 1-based grid column; gaps between columns are aisles. */
+  col: number;
+  status: SeatStatus;
+}
+
+export interface SeatRow {
+  label: string;
+  category: SeatCategory;
+  seats: SeatView[];
+}
+
+export interface SeatMap {
+  showId: number;
+  bookable: boolean;
+  maxCol: number;
+  available: number;
+  total: number;
+  prices: PriceView[];
+  rows: SeatRow[];
+}
+
+/** Payload of the "seats" Server-Sent Event. */
+export interface SeatsEvent {
+  showId: number;
+  changes: { seatId: number; status: SeatStatus }[];
+}
+
+// ------------------------------------------------------------------ checkout
+
+export type HoldStatus = 'ACTIVE' | 'CONVERTED' | 'EXPIRED' | 'RELEASED';
+export type PaymentStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'REFUNDED';
+
+export interface HeldSeat {
+  seatId: number;
+  label: string;
+  category: SeatCategory;
+  pricePaise: number;
+}
+
+export interface HoldView {
+  holdId: number;
+  status: HoldStatus;
+  source: 'CUSTOMER' | 'WAITLIST';
+  showId: number;
+  movieTitle: string;
+  cinemaName: string;
+  screenName: string;
+  startsAt: string;
+  format: ShowFormat;
+  seats: HeldSeat[];
+  ticketsPaise: number;
+  convenienceFeePaise: number;
+  totalPaise: number;
+  expiresAt: string;
+  latestPayment: { gatewayRef: string; status: PaymentStatus; failureReason: string | null; updatedAt: string } | null;
+  bookingReference: string | null;
+}
+
+export interface PaymentStarted {
+  gatewayRef: string;
+  amountPaise: number;
+  status: PaymentStatus;
+  checkoutPath: string;
+}
+
+export type WaitlistStatus = 'WAITING' | 'OFFERED' | 'FULFILLED' | 'LAPSED' | 'LEFT' | 'CLOSED';
+
+export interface WaitlistView {
+  id: number;
+  showId: number;
+  movieTitle: string;
+  cinemaName: string;
+  startsAt: string;
+  seatsWanted: number;
+  status: WaitlistStatus;
+  positionInQueue: number | null;
+  holdId: number | null;
+  joinedAt: string;
+}
+
+// ------------------------------------------------------------------ bookings
+
+export interface BookingView {
+  reference: string;
+  status: 'CONFIRMED' | 'CANCELLED';
+  showId: number;
+  movieId: number;
+  movieTitle: string;
+  posterUrl: string | null;
+  cinemaName: string;
+  cityName: string;
+  screenName: string;
+  startsAt: string;
+  format: ShowFormat;
+  seats: { label: string; category: SeatCategory; pricePaise: number }[];
+  ticketsPaise: number;
+  convenienceFeePaise: number;
+  totalPaise: number;
+  bookedAt: string;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  cancellable: boolean;
+}
+
+export interface Paged<T> {
   content: T[];
   page: number;
   size: number;
@@ -49,159 +216,87 @@ export interface Page<T> {
   last: boolean;
 }
 
-export type SortField = 'id' | 'name' | 'email' | 'department' | 'branch' | 'dateOfBirth' | 'createdAt';
-export type SortDirection = 'asc' | 'desc';
+// ------------------------------------------------------------------ admin
 
-export interface StudentQuery {
-  search?: string;
-  department?: string;
-  branch?: string;
-  page: number;
-  size: number;
-  sortBy: SortField;
-  direction: SortDirection;
-}
-
-// ---------------------------------------------------------------- academics
-
-export type EnrollmentStatus = 'ENROLLED' | 'DROPPED' | 'COMPLETED';
-export type GradeLabel = 'O' | 'A+' | 'A' | 'B+' | 'B' | 'C' | 'P' | 'F';
-export const GRADES: { label: GradeLabel; points: number; description: string }[] = [
-  { label: 'O', points: 10, description: 'Outstanding' },
-  { label: 'A+', points: 9, description: 'Excellent' },
-  { label: 'A', points: 8, description: 'Very good' },
-  { label: 'B+', points: 7, description: 'Good' },
-  { label: 'B', points: 6, description: 'Above average' },
-  { label: 'C', points: 5, description: 'Average' },
-  { label: 'P', points: 4, description: 'Pass' },
-  { label: 'F', points: 0, description: 'Fail' },
-];
-
-export interface Course {
-  id: number;
-  code: string;
+export interface MovieRequest {
   title: string;
-  description: string | null;
-  credits: number;
-  department: string;
-  term: string;
-  capacity: number;
-  enrolledCount: number;
-  seatsLeft: number;
-  instructor: string | null;
-  schedule: string | null;
-  enrollmentOpen: boolean;
+  synopsis: string;
+  durationMinutes: number;
+  language: string;
+  certificate: Certificate;
+  genres: string[];
+  releaseDate: string;
+  posterUrl: string;
 }
 
-export interface CourseRequest {
-  code: string;
-  title: string;
-  description?: string;
-  credits: number;
-  department: string;
-  term: string;
-  capacity: number;
-  instructor?: string;
-  schedule?: string;
-  enrollmentOpen: boolean;
-}
-
-export interface CourseSummary {
+export interface ScreenView {
   id: number;
-  code: string;
-  title: string;
-  credits: number;
-  term: string;
-  instructor: string | null;
-  schedule: string | null;
-}
-
-export interface AttendanceSummary {
-  classesHeld: number;
-  classesAttended: number;
-  percentage: number | null;
-  belowMinimum?: boolean;
-}
-
-export interface MyEnrollment {
-  id: number;
-  course: CourseSummary;
-  status: EnrollmentStatus;
-  grade: GradeLabel | null;
-  gradePoints: number | null;
-  enrolledAt: string | null;
-  attendance: AttendanceSummary;
-}
-
-export interface TermResult {
-  term: string;
-  sgpa: number | null;
-  credits: number;
-}
-
-export interface AcademicRecord {
-  cgpa: number | null;
-  completedCredits: number;
-  terms: TermResult[];
-  enrollments: MyEnrollment[];
-}
-
-export interface RosterEntry {
-  enrollmentId: number;
-  studentId: number;
-  studentName: string;
-  studentEmail: string;
-  branch: string;
-  status: EnrollmentStatus;
-  grade: GradeLabel | null;
-  attendance: AttendanceSummary;
-}
-
-export interface AttendanceSheetRow {
-  enrollmentId: number;
-  studentId: number;
-  studentName: string;
-  branch: string;
-  present: boolean | null;
-}
-
-export interface AttendanceSheet {
-  date: string;
-  rows: AttendanceSheetRow[];
-  recordedDates: string[];
-}
-
-export interface Announcement {
-  id: number;
-  title: string;
-  body: string;
-  audienceDepartment: string | null;
-  authorName: string | null;
-  createdAt: string | null;
-}
-
-export interface AdminDashboard {
-  totalStudents: number;
-  totalCourses: number;
-  activeEnrollments: number;
-  averageAttendance: number | null;
-  lowAttendance: { studentId: number; studentName: string; courseId: number; courseCode: string; percentage: number }[];
-  courseFill: { courseId: number; code: string; title: string; enrolled: number; capacity: number }[];
-  studentsByDepartment: { department: string; students: number }[];
-  recentAnnouncements: Announcement[];
-}
-
-export interface StudentDashboard {
   name: string;
-  department: string;
-  branch: string;
-  cgpa: number | null;
-  completedCredits: number;
-  currentCredits: number;
-  overallAttendance: number | null;
-  coursesBelowAttendance: number;
-  currentCourses: MyEnrollment[];
-  announcements: Announcement[];
+  seatCount: number;
+  categories: SeatCategory[];
+}
+
+export interface CinemaView {
+  id: number;
+  name: string;
+  address: string;
+  cityId: number;
+  cityName: string;
+  screens: ScreenView[];
+}
+
+export interface RowSpec {
+  label: string;
+  category: SeatCategory;
+  seats: number;
+  aisleAfter: number[];
+}
+
+export interface AdminShowView {
+  id: number;
+  movieId: number;
+  movieTitle: string;
+  screenId: number;
+  screenName: string;
+  startsAt: string;
+  endsAt: string;
+  format: ShowFormat;
+  status: 'SCHEDULED' | 'CANCELLED';
+  totalSeats: number;
+  bookedSeats: number;
+}
+
+export interface ShowRequest {
+  movieId: number;
+  screenId: number;
+  startsAt: string;
+  format: ShowFormat;
+  pricesPaise: Partial<Record<SeatCategory, number>>;
+}
+
+export interface AdminBookingView {
+  reference: string;
+  customerName: string;
+  customerEmail: string;
+  movieTitle: string;
+  cinemaName: string;
+  startsAt: string;
+  seats: number;
+  totalPaise: number;
+  status: string;
+  bookedAt: string;
+}
+
+export interface Dashboard {
+  bookingsToday: number;
+  ticketsToday: number;
+  revenueTodayPaise: number;
+  last7Days: { date: string; bookings: number; tickets: number; revenuePaise: number }[];
+  topMovies: { title: string; tickets: number; revenuePaise: number }[];
+  busiestUpcomingShows: {
+    showId: number; movieTitle: string; cinemaName: string; startsAt: string; booked: number; total: number;
+  }[];
+  generatedAt: string;
 }
 
 export type NotificationStatus = 'QUEUED' | 'RETRYING' | 'IN_BROKER' | 'SENT' | 'LOGGED' | 'PROCESSED' | 'FAILED';

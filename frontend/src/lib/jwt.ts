@@ -3,9 +3,8 @@ import type { Role } from '../api/types';
 /** Claims issued by the backend's JwtUtil. The signature is verified server-side; we only read claims. */
 export interface AccessTokenClaims {
   sub: string; // email
+  uid: number;
   role: Role;
-  type: 'ACCESS' | 'REFRESH';
-  pwdChangeRequired?: boolean;
   exp: number; // seconds since epoch
   iat: number;
 }

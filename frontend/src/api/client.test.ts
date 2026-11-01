@@ -15,7 +15,7 @@ describe('apiRequest', () => {
         return jsonResponse({ id: 1 }, 201);
       });
 
-      const pending = apiRequest('/students', { method: 'POST', body: {}, idempotencyKey: 'key-12345678' });
+      const pending = apiRequest('/bookings/me', { method: 'POST', body: {}, idempotencyKey: 'key-12345678' });
       await vi.advanceTimersByTimeAsync(NETWORK_RETRY_DELAYS_MS[0]);
       await expect(pending).resolves.toEqual({ id: 1 });
 
@@ -32,7 +32,7 @@ describe('apiRequest', () => {
       throw new TypeError('Failed to fetch');
     });
 
-    await expect(apiRequest('/students', { method: 'POST', body: {} })).rejects.toMatchObject({ status: 0 });
+    await expect(apiRequest('/bookings/me', { method: 'POST', body: {} })).rejects.toMatchObject({ status: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -45,7 +45,7 @@ describe('apiRequest', () => {
     signIn();
     const fetchMock = mockFetch(() => jsonResponse({ ok: true }));
 
-    await apiRequest('/students');
+    await apiRequest('/bookings/me');
 
     const headers = fetchMock.mock.calls[0][1]!.headers as Record<string, string>;
     expect(headers.Authorization).toBe(`Bearer ${tokenStore.get()!.accessToken}`);
@@ -55,7 +55,7 @@ describe('apiRequest', () => {
     signIn();
     const fetchMock = mockFetch(() => jsonResponse({}));
 
-    await apiRequest('/students', { query: { search: '', page: 0, branch: undefined } });
+    await apiRequest('/bookings/me', { query: { search: '', page: 0, branch: undefined } });
 
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get('page')).toBe('0');
@@ -67,13 +67,14 @@ describe('apiRequest', () => {
     signIn({}, -10); // already expired
     const fresh = fakeJwt({}, 900);
     const fetchMock = mockFetch((url) =>
-      url.pathname === '/auth/refresh' ? jsonResponse({ accessToken: fresh }) : jsonResponse({ ok: true }));
+      url.pathname === '/auth/refresh' ? jsonResponse({ accessToken: fresh, refreshToken: 'rotated-refresh' }) : jsonResponse({ ok: true }));
 
-    await Promise.all([apiRequest('/students'), apiRequest('/students/1')]);
+    await Promise.all([apiRequest('/bookings/me'), apiRequest('/holds/1')]);
 
     const refreshCalls = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/auth/refresh'));
     expect(refreshCalls).toHaveLength(1);
-    expect(tokenStore.get()!.accessToken).toBe(fresh);
+    // Refresh tokens rotate: the new one must replace the old, or the next refresh would end the session
+    expect(tokenStore.get()).toEqual({ accessToken: fresh, refreshToken: 'rotated-refresh' });
     const lastHeaders = fetchMock.mock.calls.at(-1)![1]!.headers as Record<string, string>;
     expect(lastHeaders.Authorization).toBe(`Bearer ${fresh}`);
   });
@@ -84,7 +85,7 @@ describe('apiRequest', () => {
     const listener = vi.fn();
     const unsubscribe = onSessionExpired(listener);
 
-    await expect(apiRequest('/students')).rejects.toMatchObject({ status: 401 });
+    await expect(apiRequest('/bookings/me')).rejects.toMatchObject({ status: 401 });
     expect(tokenStore.get()).toBeNull();
     expect(listener).toHaveBeenCalledOnce();
     unsubscribe();
@@ -110,16 +111,26 @@ describe('apiRequest', () => {
   it('reports network failures clearly', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))));
 
-    await expect(apiRequest('/students', { auth: false })).rejects.toMatchObject({ status: 0 });
+    await expect(apiRequest('/bookings/me', { auth: false })).rejects.toMatchObject({ status: 0 });
+  });
+
+  it('keeps the error body for endpoint-specific details', async () => {
+    signIn();
+    mockFetch(() => jsonResponse({ status: 409, error: 'Some seats were just taken', unavailableSeatIds: [3, 4] }, 409));
+
+    const error = (await apiRequest('/shows/1/holds', { method: 'POST', body: {} }).catch((e: unknown) => e)) as ApiError;
+
+    expect(error.message).toBe('Some seats were just taken');
+    expect(error.body.unavailableSeatIds).toEqual([3, 4]);
   });
 
   it('handles 204 No Content and plain-text responses', async () => {
     signIn();
-    mockFetch((url) => (url.pathname === '/students/1'
+    mockFetch((url) => (url.pathname === '/holds/1'
       ? new Response(null, { status: 204 })
       : new Response('Logged out successfully', { status: 200, headers: { 'Content-Type': 'text/plain' } })));
 
-    await expect(apiRequest('/students/1', { method: 'DELETE' })).resolves.toBeUndefined();
+    await expect(apiRequest('/holds/1', { method: 'DELETE' })).resolves.toBeUndefined();
     await expect(apiRequest('/auth/logout', { method: 'POST', body: {} })).resolves.toBe('Logged out successfully');
   });
 });
