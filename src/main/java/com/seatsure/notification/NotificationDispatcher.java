@@ -63,6 +63,8 @@ public class NotificationDispatcher {
             case OutboxEvents.USER_REGISTERED -> welcomeEmail(read(message, UserRegistered.class));
             case OutboxEvents.BOOKING_CONFIRMED -> ticketEmail(read(message, BookingConfirmed.class));
             case OutboxEvents.BOOKING_CANCELLED -> cancellationEmail(read(message, BookingCancelled.class));
+            case OutboxEvents.SEATS_OFFERED -> seatsOfferedEmail(read(message, OutboxEvents.SeatsOffered.class));
+            case OutboxEvents.PAYMENT_REFUNDED -> refundEmail(read(message, OutboxEvents.PaymentRefunded.class));
             case OutboxEvents.TEST_EMAIL -> testEmail(read(message, TestEmailRequested.class));
             default -> null;
         };
@@ -122,6 +124,28 @@ public class NotificationDispatcher {
                 + "in 5-7 working days."
                 + "\n\nTeam SeatSure";
         return new EmailMessage(event.email(), "Booking cancelled: " + event.movieTitle(), body);
+    }
+
+    EmailMessage seatsOfferedEmail(OutboxEvents.SeatsOffered event) {
+        String body = "Hi " + event.name() + ",\n\n"
+                + "Good news: seats opened up for " + event.movieTitle() + " on " + showTime(event.startsAt())
+                + ", and you were next on the waitlist.\n\n"
+                + "We're holding " + String.join(", ", event.seats()) + " for you (" + rupees(event.totalPaise())
+                + "). Pay by " + SHOW_TIME.format(event.expiresAt().atZone(zone))
+                + " to confirm them; after that they go to the next person in line."
+                + link("Complete your booking", "/checkout/" + event.holdId())
+                + "\n\nTeam SeatSure";
+        return new EmailMessage(event.email(), "Seats held for you: " + event.movieTitle(), body);
+    }
+
+    EmailMessage refundEmail(OutboxEvents.PaymentRefunded event) {
+        String body = "Hi " + event.name() + ",\n\n"
+                + "We received your payment of " + rupees(event.amountPaise()) + " for " + event.movieTitle()
+                + ", but we couldn't confirm the seats: " + event.reason() + ".\n\n"
+                + "The full amount has been refunded (reference " + event.gatewayRef() + ") and will reach your "
+                + "original payment method in 5-7 working days."
+                + "\n\nTeam SeatSure";
+        return new EmailMessage(event.email(), "Payment refunded: " + event.movieTitle(), body);
     }
 
     EmailMessage testEmail(TestEmailRequested event) {

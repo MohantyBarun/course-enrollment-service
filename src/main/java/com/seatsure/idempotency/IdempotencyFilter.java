@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
 
 /**
  * Makes retried POSTs safe: a client that sends the same Idempotency-Key again (after a timeout, a
- * double click or a flaky network) gets the original response instead of a second booking.
+ * double click or a flaky network) gets the original response instead of a second hold or payment.
  * The header is optional; requests without it behave as before.
  * <ul>
  *   <li>same key, same request, finished: the stored response is replayed (Idempotent-Replayed: true)</li>
@@ -50,7 +50,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
     private static final Pattern VALID_KEY = Pattern.compile("^[A-Za-z0-9_\\-:.]{8,100}$");
     private static final List<String> IDEMPOTENT_POST_PATHS =
-            List.of("/shows/*/bookings", "/bookings/*/cancel", "/admin/movies", "/admin/cinemas", "/admin/cinemas/*/screens",
+            List.of("/shows/*/holds", "/holds/*/payments", "/shows/*/waitlist", "/bookings/*/cancel", "/admin/movies", "/admin/cinemas", "/admin/cinemas/*/screens",
                     "/admin/shows", "/admin/shows/*/cancel");
     private static final AntPathMatcher PATHS = new AntPathMatcher();
 

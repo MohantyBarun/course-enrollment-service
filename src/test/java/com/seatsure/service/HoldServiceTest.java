@@ -1,12 +1,11 @@
 package com.seatsure.service;
 
-import com.seatsure.dto.BookingDtos.BookingView;
+import com.seatsure.dto.CheckoutDtos.HoldView;
 import com.seatsure.entity.*;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.SeatsUnavailableException;
-import com.seatsure.outbox.OutboxEvents;
-import com.seatsure.outbox.OutboxService;
 import com.seatsure.repository.*;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -30,10 +30,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/** Booking rules with the database mocked; the locking itself is covered by BookingConcurrencyIntegrationTest. */
+/** Hold rules with the database mocked; the locking itself is covered by HoldConcurrencyIntegrationTest. */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class BookingServiceTest {
+class HoldServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-11-01T06:00:00Z");
     private static final int CLASSIC = 20_000;
@@ -42,38 +42,36 @@ class BookingServiceTest {
     @Mock private ShowRepository shows;
     @Mock private ShowSeatRepository showSeats;
     @Mock private ShowPriceRepository prices;
-    @Mock private BookingRepository bookings;
+    @Mock private SeatHoldRepository holds;
+    @Mock private PaymentRepository payments;
     @Mock private UserRepository users;
-    @Mock private OutboxService outbox;
+    @Mock private WaitlistService waitlist;
+    @Mock private PlatformTransactionManager transactionManager;
 
-    private BookingService service;
+    private HoldService service;
     private Show show;
-    private User user;
 
     @BeforeEach
     void setUp() {
-        service = new BookingService(shows, showSeats, prices, bookings, users, outbox,
-                Clock.fixed(NOW, ZoneOffset.UTC), 2500, Duration.ofHours(2));
+        service = new HoldService(shows, showSeats, holds, payments, users, new Pricing(prices, 2500), waitlist,
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10), transactionManager, new SimpleMeterRegistry());
 
-        City city = new City("Pune", "Maharashtra");
-        Cinema cinema = new Cinema(city, "Starlight", "Somewhere");
-        Screen screen = new Screen(cinema, "Audi 1");
+        Screen screen = new Screen(new Cinema(new City("Pune", "Maharashtra"), "Starlight", "Somewhere"), "Audi 1");
         Movie movie = new Movie();
         movie.setTitle("Monsoon Protocol");
         movie.setDurationMinutes(150);
         movie.setReleaseDate(LocalDate.of(2026, 10, 1));
         show = new Show(movie, screen, NOW.plus(Duration.ofDays(1)), ShowFormat.TWO_D);
         ReflectionTestUtils.setField(show, "id", 5L);
-
-        user = new User("Asha", "asha@x.com", "hash", Roles.ROLE_CUSTOMER);
+        User user = new User("Asha", "asha@x.com", "hash", Roles.ROLE_CUSTOMER);
         ReflectionTestUtils.setField(user, "id", 7L);
 
         when(shows.lockForShare(5L)).thenReturn(Optional.of(5L));
         when(shows.findDetailed(5L)).thenReturn(Optional.of(show));
         when(users.getReferenceById(7L)).thenReturn(user);
+        when(holds.findActiveForUpdate(7L, 5L)).thenReturn(Optional.empty());
         when(prices.findByShowId(5L)).thenReturn(List.of(new ShowPrice(show, SeatCategory.CLASSIC, CLASSIC),
                 new ShowPrice(show, SeatCategory.PRIME, PRIME)));
-        when(bookings.existsByReference(any())).thenReturn(false);
     }
 
     private ShowSeat showSeat(long seatId, String row, int number, SeatCategory category, ShowSeatStatus status) {
@@ -87,81 +85,88 @@ class BookingServiceTest {
     }
 
     @Test
-    @DisplayName("books the seats, prices them per category, adds the fee and records the ticket email")
-    void book_success() {
+    @DisplayName("holds the seats for 10 minutes, priced per category plus the per-seat fee")
+    void create_success() {
         ShowSeat a = showSeat(11, "H", 2, SeatCategory.PRIME, ShowSeatStatus.AVAILABLE);
         ShowSeat b = showSeat(10, "A", 1, SeatCategory.CLASSIC, ShowSeatStatus.AVAILABLE);
-        when(showSeats.lockSeats(eq(5L), anyCollection())).thenReturn(List.of(a, b));
+        when(showSeats.lockSeats(eq(5L), anyCollection())).thenReturn(List.of(b, a));
 
-        BookingView view = service.book(7L, 5L, List.of(11L, 10L));
+        HoldView view = service.create(7L, 5L, List.of(11L, 10L));
 
         assertThat(view.seats()).extracting(s -> s.label()).containsExactly("A1", "H2");
         assertThat(view.ticketsPaise()).isEqualTo(CLASSIC + PRIME);
         assertThat(view.convenienceFeePaise()).isEqualTo(2 * 2500);
         assertThat(view.totalPaise()).isEqualTo(CLASSIC + PRIME + 5000);
-        assertThat(view.reference()).startsWith("SS").hasSize(10);
-        assertThat(view.cancellable()).isTrue();
-        assertThat(a.getStatus()).isEqualTo(ShowSeatStatus.BOOKED);
-        assertThat(b.getBooking()).isSameAs(a.getBooking()).isNotNull();
-        verify(outbox).record(eq("Booking"), any(), eq(OutboxEvents.BOOKING_CONFIRMED), any());
+        assertThat(view.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        assertThat(a.getStatus()).isEqualTo(ShowSeatStatus.HELD);
+        assertThat(a.getHold()).isSameAs(b.getHold()).isNotNull();
+        verify(holds).save(any(SeatHold.class));
     }
 
     @Test
-    @DisplayName("all or nothing: one taken seat fails the booking and names the taken seat")
-    void book_takenSeat_failsWholeBooking() {
+    @DisplayName("all or nothing: one taken seat fails the hold and names the taken seat")
+    void create_takenSeat_failsWholeHold() {
         ShowSeat free = showSeat(10, "A", 1, SeatCategory.CLASSIC, ShowSeatStatus.AVAILABLE);
         ShowSeat taken = showSeat(11, "A", 2, SeatCategory.CLASSIC, ShowSeatStatus.BOOKED);
         when(showSeats.lockSeats(eq(5L), anyCollection())).thenReturn(List.of(free, taken));
 
-        assertThatThrownBy(() -> service.book(7L, 5L, List.of(10L, 11L)))
+        assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L, 11L)))
                 .isInstanceOfSatisfying(SeatsUnavailableException.class,
                         e -> assertThat(e.getSeatIds()).containsExactly(11L));
         assertThat(free.getStatus()).isEqualTo(ShowSeatStatus.AVAILABLE);
-        verify(bookings, never()).save(any());
-        verifyNoInteractions(outbox);
+        verify(holds, never()).save(any());
     }
 
     @Test
-    void book_seatFromAnotherShow_isRejected() {
+    void create_seatFromAnotherShow_isRejected() {
         when(showSeats.lockSeats(eq(5L), anyCollection()))
                 .thenReturn(List.of(showSeat(10, "A", 1, SeatCategory.CLASSIC, ShowSeatStatus.AVAILABLE)));
 
-        assertThatThrownBy(() -> service.book(7L, 5L, List.of(10L, 999L))).isInstanceOf(BadRequestException.class);
+        assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L, 999L))).isInstanceOf(BadRequestException.class);
     }
 
     @Test
-    void book_sameSeatTwice_isRejected() {
-        assertThatThrownBy(() -> service.book(7L, 5L, List.of(10L, 10L))).isInstanceOf(BadRequestException.class);
+    void create_sameSeatTwice_isRejectedBeforeLocking() {
+        assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L, 10L))).isInstanceOf(BadRequestException.class);
         verify(showSeats, never()).lockSeats(any(), any());
     }
 
     @Test
-    void book_afterTheShowStarts_isRejected() {
+    void create_afterTheShowStarts_isRejected() {
         show.setStartsAt(NOW.minusSeconds(60));
 
-        assertThatThrownBy(() -> service.book(7L, 5L, List.of(10L)))
+        assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L)))
                 .isInstanceOf(BadRequestException.class).hasMessageContaining("closed");
     }
 
     @Test
-    void book_cancelledShow_isRejected() {
+    void create_cancelledShow_isRejected() {
         show.setStatus(ShowStatus.CANCELLED);
 
-        assertThatThrownBy(() -> service.book(7L, 5L, List.of(10L)))
+        assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L)))
                 .isInstanceOf(BadRequestException.class).hasMessageContaining("cancelled");
     }
 
     @Test
-    @DisplayName("cancellation closes 2 hours before the show")
-    void cancellationCutoff() {
-        Booking booking = new Booking("SSAAAAAAAA", user, show);
-        assertThat(service.isCancellable(booking, NOW)).isTrue();
+    void holdIsLiveOnlyWhileActiveAndUnexpired() {
+        SeatHold hold = new SeatHold(show, null, SeatHold.Source.CUSTOMER, NOW, NOW.plus(Duration.ofMinutes(10)));
 
-        show.setStartsAt(NOW.plus(Duration.ofMinutes(119)));
-        assertThat(service.isCancellable(booking, NOW)).isFalse();
+        assertThat(hold.isLive(NOW.plus(Duration.ofMinutes(9)))).isTrue();
+        assertThat(hold.isLive(NOW.plus(Duration.ofMinutes(10)))).isFalse();
+        hold.close(SeatHold.Status.RELEASED, NOW);
+        assertThat(hold.isLive(NOW)).isFalse();
+    }
 
-        show.setStartsAt(NOW.plus(Duration.ofDays(1)));
-        booking.cancel("x", NOW);
-        assertThat(service.isCancellable(booking, NOW)).isFalse();
+    @Test
+    @DisplayName("waitlist offers prefer seats side by side")
+    void pickTogether_prefersAdjacentSeats() {
+        ShowSeat a1 = showSeat(1, "A", 1, SeatCategory.CLASSIC, ShowSeatStatus.HELD);
+        ShowSeat a3 = showSeat(3, "A", 3, SeatCategory.CLASSIC, ShowSeatStatus.HELD);
+        ShowSeat b4 = showSeat(4, "B", 4, SeatCategory.CLASSIC, ShowSeatStatus.HELD);
+        ShowSeat b5 = showSeat(5, "B", 5, SeatCategory.CLASSIC, ShowSeatStatus.HELD);
+
+        assertThat(WaitlistService.pickTogether(List.of(a1, a3, b5, b4), 2)).containsExactly(b4, b5);
+        assertThat(WaitlistService.pickTogether(List.of(a1, a3, b5), 2)).as("no pair: first two in order")
+                .containsExactly(a1, a3);
     }
 }

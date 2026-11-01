@@ -1,6 +1,5 @@
 package com.seatsure.controller;
 
-import com.seatsure.dto.BookingDtos.BookRequest;
 import com.seatsure.dto.BookingDtos.BookingView;
 import com.seatsure.dto.BookingDtos.CancelRequest;
 import com.seatsure.dto.PagedResponseDTO;
@@ -13,30 +12,18 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URI;
 
 @RestController
 @RequiredArgsConstructor
 @Validated
-@Tag(name = "Bookings", description = "Book seats, view and cancel your bookings")
+@Tag(name = "Bookings", description = "View and cancel your bookings (bookings are made through checkout)")
 public class BookingController {
 
     private final BookingService bookings;
-
-    @Operation(summary = "Book seats for a show",
-            description = "All or nothing: if any seat was taken first, nothing is booked and the 409 response lists "
-                    + "the taken seats in unavailableSeatIds. Send an Idempotency-Key header to make retries safe.")
-    @PostMapping("/shows/{showId}/bookings")
-    public ResponseEntity<BookingView> book(@PathVariable Long showId, @Valid @RequestBody BookRequest request,
-                                            @Parameter(hidden = true) @AuthenticationPrincipal CurrentUser user) {
-        BookingView booking = bookings.book(user.id(), showId, request.seatIds());
-        return ResponseEntity.created(URI.create("/bookings/" + booking.reference())).body(booking);
-    }
 
     @Operation(summary = "Your bookings, latest show first")
     @GetMapping("/bookings/me")

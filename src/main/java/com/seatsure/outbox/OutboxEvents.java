@@ -10,6 +10,8 @@ public final class OutboxEvents {
     public static final String USER_REGISTERED = "user.registered";
     public static final String BOOKING_CONFIRMED = "booking.confirmed";
     public static final String BOOKING_CANCELLED = "booking.cancelled";
+    public static final String SEATS_OFFERED = "waitlist.seats-offered";
+    public static final String PAYMENT_REFUNDED = "payment.refunded";
     public static final String TEST_EMAIL = "notification.test";
 
     private OutboxEvents() {
@@ -25,6 +27,16 @@ public final class OutboxEvents {
 
     public record BookingCancelled(String reference, String name, String email, String movieTitle, Instant startsAt,
                                    int refundPaise, String reason) {
+    }
+
+    /** Seats that came free were held for a waitlisted customer, who has until expiresAt to pay. */
+    public record SeatsOffered(Long holdId, String name, String email, String movieTitle, Instant startsAt,
+                               List<String> seats, int totalPaise, Instant expiresAt) {
+    }
+
+    /** A payment arrived after its hold had lapsed (or the show was cancelled): the money goes back. */
+    public record PaymentRefunded(String gatewayRef, String name, String email, String movieTitle, int amountPaise,
+                                  String reason) {
     }
 
     /** An admin checking the email setup end to end (SMTP credentials, sender, allowlist). */

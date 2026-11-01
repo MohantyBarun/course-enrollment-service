@@ -125,6 +125,8 @@ public class NotificationFeedService {
             case OutboxEvents.USER_REGISTERED -> "Welcome email";
             case OutboxEvents.BOOKING_CONFIRMED -> "Ticket confirmation";
             case OutboxEvents.BOOKING_CANCELLED -> "Cancellation and refund";
+            case OutboxEvents.SEATS_OFFERED -> "Waitlist: seats held";
+            case OutboxEvents.PAYMENT_REFUNDED -> "Late payment refunded";
             case OutboxEvents.TEST_EMAIL -> "Test email";
             default -> eventType;
         };

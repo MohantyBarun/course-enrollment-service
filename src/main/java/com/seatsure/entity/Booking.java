@@ -54,6 +54,11 @@ public class Booking {
     @Column(name = "cancel_reason", length = 200)
     private String cancelReason;
 
+    /** The payment that bought it (null for seeded demo bookings). */
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_id")
+    private Payment payment;
+
     @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("seatLabel")
     private List<BookingSeat> seats = new ArrayList<>();

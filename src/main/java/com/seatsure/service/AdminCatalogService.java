@@ -40,6 +40,8 @@ public class AdminCatalogService {
     private final ShowPriceRepository prices;
     private final ShowSeatRepository showSeats;
     private final BookingService bookingService;
+    private final SeatHoldRepository holds;
+    private final WaitlistService waitlist;
     private final Clock clock;
     private final ZoneId zone;
 
@@ -222,22 +224,32 @@ public class AdminCatalogService {
         }).toList();
     }
 
-    /** Cancels a show and every booking for it (each customer gets a cancellation and refund email). */
+    /**
+     * Cancels a show: live holds are released, every booking is cancelled and refunded (each customer
+     * is emailed), and the waitlist is closed. Lock order: show -> holds -> seats -> bookings -> seats
+     * -> waitlist entries, the same order the rest of checkout uses.
+     */
     @CacheEvict(cacheNames = {CacheConfig.NOW_SHOWING, CacheConfig.ADMIN_DASHBOARD}, allEntries = true)
     @Transactional
     public ShowCancelled cancelShow(Long showId, String reason) {
-        // Exclusive lock: waits for bookings in flight (they hold a shared lock) and blocks new ones
-        Show show = shows.findByIdForUpdate(showId)
-                .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        // Waits for holds and payments in flight (they hold a shared lock) and blocks new ones
+        shows.lockForCancellation(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        Show show = shows.findDetailed(showId).orElseThrow();
         if (show.getStatus() == ShowStatus.CANCELLED) {
             throw new ConflictException("This show is already cancelled");
         }
         if (!show.getStartsAt().isAfter(clock.instant())) {
             throw new BadRequestException("This show has already started");
         }
+        Instant now = clock.instant();
         show.setStatus(ShowStatus.CANCELLED);
+        for (SeatHold hold : holds.findActiveForShowForUpdate(showId)) {
+            showSeats.lockByHold(hold.getId()).forEach(ShowSeat::release);
+            hold.close(SeatHold.Status.RELEASED, now); // a payment still in flight is refunded when it lands
+        }
         int cancelled = bookingService.cancelAllForShow(showId, "Show cancelled by the cinema: " + reason.trim());
-        log.info("Show {} cancelled; {} booking(s) cancelled", showId, cancelled);
+        int closed = waitlist.closeForShow(showId, now);
+        log.info("Show {} cancelled; {} booking(s) cancelled, {} waitlist entr(ies) closed", showId, cancelled, closed);
         return new ShowCancelled(showId, cancelled);
     }
 }

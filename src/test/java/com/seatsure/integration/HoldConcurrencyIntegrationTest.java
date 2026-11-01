@@ -3,6 +3,7 @@ package com.seatsure.integration;
 import com.seatsure.exception.SeatsUnavailableException;
 import com.seatsure.service.AdminCatalogService;
 import com.seatsure.service.BookingService;
+import com.seatsure.service.HoldService;
 import com.seatsure.support.FullAppIntegrationTest;
 import com.seatsure.support.TestFixtures;
 import com.seatsure.support.TestFixtures.ShowFixture;
@@ -18,39 +19,40 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Many customers racing for the same seats, against real PostgreSQL row locks. These are the
- * tests that prove the core promise: a seat is never sold twice, and overlapping requests never
- * deadlock.
+ * Many customers racing for the same seats, against real PostgreSQL row locks. Holding seats is the
+ * step customers race on (a booking only ever comes from a paid hold), so these tests prove the core
+ * promise: a seat is never held or sold twice, and overlapping requests never deadlock.
  */
 @FullAppIntegrationTest
-class BookingConcurrencyIntegrationTest {
+class HoldConcurrencyIntegrationTest {
 
     private static final int THREADS = 30;
 
+    @Autowired private HoldService holds;
     @Autowired private BookingService bookings;
     @Autowired private AdminCatalogService admin;
     @Autowired private TestFixtures fixtures;
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    @DisplayName("30 customers click the same seat at the same moment: exactly one gets it")
+    @DisplayName("30 customers grab the same seat at the same moment: exactly one holds it")
     void sameSeat_exactlyOneWinner() throws Exception {
         ShowFixture show = fixtures.show(2, 10);
         Long seat = show.seatIds().get(5);
         List<Long> customers = customers(THREADS);
 
-        Outcomes outcomes = race(customers.size(), i -> bookings.book(customers.get(i), show.showId(), List.of(seat)));
+        Outcomes outcomes = race(THREADS, i -> holds.create(customers.get(i), show.showId(), List.of(seat)));
 
         assertThat(outcomes.succeeded.get()).isEqualTo(1);
         assertThat(outcomes.seatsTaken.get()).isEqualTo(THREADS - 1);
         assertThat(outcomes.unexpected).isEmpty();
-        assertThat(confirmedBookings(show.showId())).isEqualTo(1);
+        assertThat(activeHolds(show.showId())).isEqualTo(1);
         assertInventoryConsistent(show.showId());
     }
 
     @Test
-    @DisplayName("overlapping multi-seat requests in random order: no seat sold twice, no deadlocks")
-    void overlappingSeatSets_noDoubleSaleAndNoDeadlock() throws Exception {
+    @DisplayName("overlapping multi-seat requests in random order: no seat held twice, no deadlocks")
+    void overlappingSeatSets_noDoubleHoldAndNoDeadlock() throws Exception {
         ShowFixture show = fixtures.show(2, 10); // 20 seats, 30 buyers wanting 2-4 each: heavy overlap
         List<Long> seatIds = show.seatIds();
         List<Long> customers = customers(THREADS);
@@ -62,39 +64,76 @@ class BookingConcurrencyIntegrationTest {
             requests.add(shuffled.subList(0, 2 + random.nextInt(3))); // ids in random order, not sorted
         }
 
-        Outcomes outcomes = race(THREADS, i -> bookings.book(customers.get(i), show.showId(), requests.get(i)));
+        Outcomes outcomes = race(THREADS, i -> holds.create(customers.get(i), show.showId(), requests.get(i)));
 
         assertThat(outcomes.unexpected).as("no deadlocks, lock timeouts or other errors").isEmpty();
         assertThat(outcomes.succeeded.get()).isPositive();
         assertThat(outcomes.succeeded.get() + outcomes.seatsTaken.get()).isEqualTo(THREADS);
+        Long heldSeats = jdbc.queryForObject("SELECT COALESCE(SUM(seat_count), 0) FROM seat_holds "
+                + "WHERE show_id = ? AND status = 'ACTIVE'", Long.class, show.showId());
+        assertThat(heldSeats).as("seats held == seats marked HELD, so none is held twice").isEqualTo(
+                jdbc.queryForObject("SELECT COUNT(*) FROM show_seats WHERE show_id = ? AND status = 'HELD'",
+                        Long.class, show.showId())).isLessThanOrEqualTo(20L);
         assertInventoryConsistent(show.showId());
-        Long sold = jdbc.queryForObject("SELECT COUNT(*) FROM booking_seats bs JOIN bookings b ON b.id = bs.booking_id "
-                + "WHERE b.show_id = ? AND b.status = 'CONFIRMED'", Long.class, show.showId());
-        Long distinctSold = jdbc.queryForObject("SELECT COUNT(DISTINCT bs.seat_id) FROM booking_seats bs "
-                + "JOIN bookings b ON b.id = bs.booking_id WHERE b.show_id = ? AND b.status = 'CONFIRMED'",
-                Long.class, show.showId());
-        assertThat(sold).as("every sold seat was sold once").isEqualTo(distinctSold).isLessThanOrEqualTo(20);
     }
 
     @Test
-    @DisplayName("a cancelled booking's seats can be booked again")
-    void cancellation_releasesSeats() {
+    @DisplayName("a paid hold becomes a booking; cancelling it refunds and frees the seats for others")
+    void bookingAndCancellation() {
         ShowFixture show = fixtures.show(1, 6);
         List<Long> seats = show.seatIds().subList(0, 2);
         Long first = fixtures.customer().user().id();
         Long second = fixtures.customer().user().id();
 
-        var booking = bookings.book(first, show.showId(), seats);
-        bookings.cancel(first, booking.reference(), null);
-        var again = bookings.book(second, show.showId(), seats);
+        String reference = fixtures.book(first, show.showId(), seats);
+        assertThat(reference).startsWith("SS");
+        assertInventoryConsistent(show.showId());
 
-        assertThat(again.seats()).hasSize(2);
+        bookings.cancel(first, reference, null);
+        assertThat(jdbc.queryForObject("SELECT p.status FROM payments p JOIN bookings b ON b.payment_id = p.id "
+                + "WHERE b.reference = ?", String.class, reference)).isEqualTo("REFUNDED");
+        assertThat(fixtures.book(second, show.showId(), seats)).isNotEqualTo(reference);
         assertInventoryConsistent(show.showId());
     }
 
     @Test
-    @DisplayName("a show cancelled while customers are booking ends with no confirmed bookings")
-    void showCancellation_racingBookings_leavesNothingConfirmed() throws Exception {
+    @DisplayName("choosing seats again replaces your hold: kept seats stay yours, dropped ones are freed")
+    void holdingAgain_replacesThePreviousHold() {
+        ShowFixture show = fixtures.show(1, 6);
+        List<Long> seats = show.seatIds();
+        Long customer = fixtures.customer().user().id();
+
+        var first = holds.create(customer, show.showId(), seats.subList(0, 3));
+        var second = holds.create(customer, show.showId(), seats.subList(2, 5));
+
+        assertThat(jdbc.queryForObject("SELECT status FROM seat_holds WHERE id = ?", String.class, first.holdId()))
+                .isEqualTo("RELEASED");
+        assertThat(activeHolds(show.showId())).isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT seat_id FROM show_seats WHERE hold_id = ? ORDER BY seat_id", Long.class,
+                second.holdId())).containsExactlyElementsOf(seats.subList(2, 5));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM show_seats WHERE show_id = ? AND status = 'AVAILABLE'",
+                Long.class, show.showId())).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("an expired hold's seats go back on sale")
+    void expiredHold_releasesSeats() {
+        ShowFixture show = fixtures.show(1, 4);
+        Long customer = fixtures.customer().user().id();
+        var hold = holds.create(customer, show.showId(), show.seatIds().subList(0, 2));
+
+        fixtures.ageOut(hold.holdId());
+        holds.expireDue();
+
+        assertThat(jdbc.queryForObject("SELECT status FROM seat_holds WHERE id = ?", String.class, hold.holdId()))
+                .isEqualTo("EXPIRED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM show_seats WHERE show_id = ? AND status = 'AVAILABLE'",
+                Long.class, show.showId())).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("a show cancelled while customers are holding seats ends with nothing held")
+    void showCancellation_racingHolds_leavesNothingHeld() throws Exception {
         ShowFixture show = fixtures.show(3, 10);
         List<Long> customers = customers(THREADS);
         CountDownLatch start = new CountDownLatch(1);
@@ -106,9 +145,9 @@ class BookingConcurrencyIntegrationTest {
                 futures.add(pool.submit(() -> {
                     start.await();
                     try {
-                        bookings.book(customers.get(n), show.showId(), List.of(show.seatIds().get(n)));
+                        holds.create(customers.get(n), show.showId(), List.of(show.seatIds().get(n)));
                     } catch (RuntimeException ignored) {
-                        // closed, or cancelled before this booking got the lock
+                        // closed, or cancelled before this hold got the lock
                     }
                     return null;
                 }));
@@ -126,7 +165,7 @@ class BookingConcurrencyIntegrationTest {
             pool.shutdownNow();
         }
 
-        assertThat(confirmedBookings(show.showId())).isZero();
+        assertThat(activeHolds(show.showId())).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM show_seats WHERE show_id = ? AND status <> 'AVAILABLE'",
                 Long.class, show.showId())).isZero();
     }
@@ -141,23 +180,31 @@ class BookingConcurrencyIntegrationTest {
         return ids;
     }
 
-    private long confirmedBookings(Long showId) {
-        return jdbc.queryForObject("SELECT COUNT(*) FROM bookings WHERE show_id = ? AND status = 'CONFIRMED'",
+    private long activeHolds(Long showId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM seat_holds WHERE show_id = ? AND status = 'ACTIVE'",
                 Long.class, showId);
     }
 
-    /** show_seats agrees with the bookings: booked seats == seats of confirmed bookings, seat for seat. */
+    /**
+     * show_seats agrees with holds and bookings, seat for seat: HELD seats belong to active holds,
+     * BOOKED seats to confirmed bookings (which list exactly those seats).
+     */
     private void assertInventoryConsistent(Long showId) {
-        Long mismatches = jdbc.queryForObject("""
+        Long badHeld = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM show_seats ss LEFT JOIN seat_holds h ON h.id = ss.hold_id
+                WHERE ss.show_id = ? AND ss.status = 'HELD' AND (h.status IS DISTINCT FROM 'ACTIVE')
+                """, Long.class, showId);
+        Long badBooked = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM show_seats ss
                 FULL JOIN (SELECT bs.seat_id, b.id AS booking_id FROM booking_seats bs
                            JOIN bookings b ON b.id = bs.booking_id
                            WHERE b.show_id = ? AND b.status = 'CONFIRMED') sold
                   ON sold.seat_id = ss.seat_id
                 WHERE ss.show_id = ? AND ((ss.status = 'BOOKED') <> (sold.booking_id IS NOT NULL)
-                   OR ss.booking_id IS DISTINCT FROM sold.booking_id)
+                   OR (ss.status = 'BOOKED' AND ss.booking_id IS DISTINCT FROM sold.booking_id))
                 """, Long.class, showId, showId);
-        assertThat(mismatches).as("seat inventory matches confirmed bookings").isZero();
+        assertThat(badHeld).as("HELD seats belong to active holds").isZero();
+        assertThat(badBooked).as("BOOKED seats match confirmed bookings").isZero();
     }
 
     private interface Attempt {

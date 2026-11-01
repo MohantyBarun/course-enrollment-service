@@ -7,36 +7,29 @@ import com.seatsure.entity.*;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.ConflictException;
 import com.seatsure.exception.ResourceNotFoundException;
-import com.seatsure.exception.SeatsUnavailableException;
 import com.seatsure.outbox.OutboxEvents;
 import com.seatsure.outbox.OutboxService;
-import com.seatsure.repository.*;
-import io.micrometer.observation.annotation.Observed;
+import com.seatsure.payment.Refunds;
+import com.seatsure.repository.BookingRepository;
+import com.seatsure.repository.ShowSeatRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Comparator;
+import java.util.List;
 
 /**
- * Booking seats without ever selling one twice.
- *
- * <p>The seats of a show are rows in {@code show_seats}. A booking locks the requested rows
- * ({@code SELECT ... FOR UPDATE}, in id order so overlapping requests can't deadlock), checks
- * they're all still AVAILABLE, and flips them to BOOKED in the same transaction. A competing
- * request for any of the same seats blocks on the lock, then sees them BOOKED and gets a 409 that
- * names the taken seats. Requests for different seats of the same show don't block each other.
- *
- * <p>Lock order: show (shared) -> show seats. Show cancellation takes show (exclusive) -> bookings ->
- * show seats, and a customer cancellation takes booking -> show seats, so there's no cycle.
+ * Bookings: created only from a paid hold (see PaymentService), viewed, and cancelled with a
+ * refund. Freed seats go to the waitlist first.
  */
 @Slf4j
 @Service
@@ -45,80 +38,60 @@ public class BookingService {
     private static final char[] REFERENCE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    private final ShowRepository shows;
     private final ShowSeatRepository showSeats;
-    private final ShowPriceRepository prices;
     private final BookingRepository bookings;
-    private final UserRepository users;
+    private final Pricing pricing;
+    private final WaitlistService waitlist;
+    private final Refunds refunds;
     private final OutboxService outbox;
     private final Clock clock;
-    private final int convenienceFeePerSeatPaise;
     private final Duration cancellationCutoff;
 
-    public BookingService(ShowRepository shows, ShowSeatRepository showSeats, ShowPriceRepository prices,
-                          BookingRepository bookings, UserRepository users, OutboxService outbox, Clock clock,
-                          @Value("${app.booking.convenience-fee-paise:2500}") int convenienceFeePerSeatPaise,
+    public BookingService(ShowSeatRepository showSeats, BookingRepository bookings, Pricing pricing,
+                          WaitlistService waitlist, Refunds refunds, OutboxService outbox, Clock clock,
                           @Value("${app.booking.cancellation-cutoff:PT2H}") Duration cancellationCutoff) {
-        this.shows = shows;
         this.showSeats = showSeats;
-        this.prices = prices;
         this.bookings = bookings;
-        this.users = users;
+        this.pricing = pricing;
+        this.waitlist = waitlist;
+        this.refunds = refunds;
         this.outbox = outbox;
         this.clock = clock;
-        this.convenienceFeePerSeatPaise = convenienceFeePerSeatPaise;
         this.cancellationCutoff = cancellationCutoff;
     }
 
-    @Observed(name = "booking.create", contextualName = "book-seats")
+    /**
+     * Turns a live, paid hold into a booking. The caller holds the show (shared) and hold locks;
+     * the seats are locked here and must all still belong to the hold.
+     */
     @CacheEvict(cacheNames = CacheConfig.ADMIN_DASHBOARD, allEntries = true)
-    @Transactional
-    public BookingView book(Long userId, Long showId, List<Long> requestedSeatIds) {
-        Instant now = clock.instant();
-        Set<Long> seatIds = new LinkedHashSet<>(requestedSeatIds);
-        if (seatIds.size() != requestedSeatIds.size()) {
-            throw new BadRequestException("The same seat was selected twice");
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Booking createFromHold(SeatHold hold, Payment payment, Instant now) {
+        List<ShowSeat> seats = showSeats.lockByHold(hold.getId());
+        if (seats.size() != hold.getSeatCount()) {
+            throw new IllegalStateException("Hold " + hold.getId() + " has " + seats.size() + " seats, expected "
+                    + hold.getSeatCount());
         }
-        // Shared lock first, so the status read below can't be overtaken by a show cancellation
-        shows.lockForShare(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
-        Show show = shows.findDetailed(showId)
-                .orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
-        if (!show.isBookable(now)) {
-            throw new BadRequestException(show.getStatus() == ShowStatus.CANCELLED
-                    ? "This show has been cancelled" : "Bookings for this show have closed");
-        }
-
-        List<ShowSeat> locked = showSeats.lockSeats(showId, seatIds);
-        if (locked.size() != seatIds.size()) {
-            throw new BadRequestException("Some of the selected seats don't exist in this show");
-        }
-        List<Long> taken = locked.stream().filter(ss -> ss.getStatus() != ShowSeatStatus.AVAILABLE)
-                .map(ss -> ss.getSeat().getId()).sorted().toList();
-        if (!taken.isEmpty()) {
-            throw new SeatsUnavailableException(taken);
-        }
-
-        Map<SeatCategory, Integer> priceByCategory = prices.findByShowId(showId).stream()
-                .collect(Collectors.toMap(ShowPrice::getCategory, ShowPrice::getPricePaise));
-        User user = users.getReferenceById(userId);
-        Booking booking = new Booking(newReference(), user, show);
-        locked.stream()
+        Show show = hold.getShow();
+        Pricing.Quote quote = pricing.quote(show.getId(), seats);
+        Booking booking = new Booking(newReference(), hold.getUser(), show);
+        seats.stream()
                 .sorted(Comparator.comparing((ShowSeat ss) -> ss.getSeat().getRowLabel())
                         .thenComparingInt(ss -> ss.getSeat().getSeatNumber()))
-                .forEach(ss -> {
-                    Integer price = priceByCategory.get(ss.getSeat().getCategory());
-                    if (price == null) {
-                        throw new IllegalStateException("Show " + showId + " has no price for " + ss.getSeat().getCategory());
-                    }
-                    booking.addSeat(ss.getSeat(), price);
-                });
-        booking.setConvenienceFeePaise(convenienceFeePerSeatPaise * booking.getSeatCount());
+                .forEach(ss -> booking.addSeat(ss.getSeat(), quote.priceOf(ss)));
+        booking.setConvenienceFeePaise(hold.getConvenienceFeePaise());
+        booking.setPayment(payment);
         bookings.save(booking);
-        locked.forEach(ss -> ss.book(booking));
+        seats.forEach(ss -> ss.book(booking));
 
-        outbox.record("Booking", booking.getId(), OutboxEvents.BOOKING_CONFIRMED, confirmedEvent(booking));
-        log.info("Booking {} confirmed: {} seat(s) for show {}", booking.getReference(), booking.getSeatCount(), showId);
-        return BookingView.of(booking, isCancellable(booking, now));
+        User user = hold.getUser();
+        outbox.record("Booking", booking.getId(), OutboxEvents.BOOKING_CONFIRMED, new OutboxEvents.BookingConfirmed(
+                booking.getReference(), user.getName(), user.getEmail(), show.getMovie().getTitle(),
+                show.getScreen().getCinema().getName(), show.getScreen().getName(), show.getStartsAt(),
+                show.getFormat().label(), booking.getSeats().stream().map(BookingSeat::getSeatLabel).toList(),
+                booking.totalPaise()));
+        log.info("Booking {} confirmed: {} seat(s) for show {}", booking.getReference(), booking.getSeatCount(), show.getId());
+        return booking;
     }
 
     @CacheEvict(cacheNames = CacheConfig.ADMIN_DASHBOARD, allEntries = true)
@@ -138,16 +111,22 @@ public class BookingService {
             throw new BadRequestException("Bookings can be cancelled up to "
                     + cancellationCutoff.toHours() + " hours before the show");
         }
-        cancelAndRelease(booking, reason == null || reason.isBlank() ? "Cancelled by customer" : reason.trim(), now);
+        List<ShowSeat> seats = showSeats.lockByBooking(booking.getId());
+        cancelAndRefund(booking, reason == null || reason.isBlank() ? "Cancelled by customer" : reason.trim(), now);
+        int offered = waitlist.reallocate(booking.getShow(), seats, now);
+        log.info("Booking {} cancelled; {} seat(s) freed, {} waitlist offer(s)", reference, seats.size(), offered);
         return BookingView.of(booking, false);
     }
 
-    /** Used when an admin cancels a whole show: every confirmed booking is cancelled and refunded. */
-    @Transactional
+    /** An admin cancelled the whole show: every confirmed booking is cancelled and refunded. */
+    @Transactional(propagation = Propagation.MANDATORY)
     public int cancelAllForShow(Long showId, String reason) {
         Instant now = clock.instant();
         List<Booking> confirmed = bookings.findConfirmedForShowForUpdate(showId);
-        confirmed.forEach(b -> cancelAndRelease(b, reason, now));
+        for (Booking b : confirmed) {
+            showSeats.lockByBooking(b.getId()).forEach(ShowSeat::release);
+            cancelAndRefund(b, reason, now);
+        }
         return confirmed.size();
     }
 
@@ -174,22 +153,14 @@ public class BookingService {
                 && now.isBefore(booking.getShow().getStartsAt().minus(cancellationCutoff));
     }
 
-    private void cancelAndRelease(Booking booking, String reason, Instant now) {
+    /** Seats must already be locked (and released or handed on) by the caller. */
+    private void cancelAndRefund(Booking booking, String reason, Instant now) {
         booking.cancel(reason, now);
-        int released = showSeats.releaseBooking(booking.getId());
+        refunds.refund(booking.getPayment(), reason, now);
         outbox.record("Booking", booking.getId(), OutboxEvents.BOOKING_CANCELLED,
                 new OutboxEvents.BookingCancelled(booking.getReference(), booking.getUser().getName(),
                         booking.getUser().getEmail(), booking.getShow().getMovie().getTitle(),
                         booking.getShow().getStartsAt(), booking.totalPaise(), reason));
-        log.info("Booking {} cancelled ({} seat(s) released): {}", booking.getReference(), released, reason);
-    }
-
-    private OutboxEvents.BookingConfirmed confirmedEvent(Booking b) {
-        Show s = b.getShow();
-        return new OutboxEvents.BookingConfirmed(b.getReference(), b.getUser().getName(), b.getUser().getEmail(),
-                s.getMovie().getTitle(), s.getScreen().getCinema().getName(), s.getScreen().getName(),
-                s.getStartsAt(), s.getFormat().label(),
-                b.getSeats().stream().map(BookingSeat::getSeatLabel).toList(), b.totalPaise());
     }
 
     /** "SS" + 8 characters without look-alikes (0/O, 1/I/L, U): about 6.5e11 combinations. */
