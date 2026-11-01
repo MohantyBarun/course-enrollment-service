@@ -55,15 +55,15 @@ class OutboxIntegrationTest {
         Long userId = authService.register(new RegisterRequest("Outbox Tester", email, null, TestFixtures.PASSWORD))
                 .user().id();
         TestFixtures.ShowFixture show = fixtures.show(1, 4);
-        var booking = bookingService.book(userId, show.showId(), show.seatIds().subList(0, 2));
-        bookingService.cancel(userId, booking.reference(), "Plans changed");
+        String reference = fixtures.book(userId, show.showId(), show.seatIds().subList(0, 2));
+        bookingService.cancel(userId, reference, "Plans changed");
 
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
             verify(emailSender, times(1)).send(argThat((EmailMessage m) ->
                     m.to().equals(email) && m.subject().equals("Welcome to SeatSure")));
             verify(emailSender, times(1)).send(argThat((EmailMessage m) ->
                     m.to().equals(email) && m.subject().startsWith("Tickets confirmed: ")
-                            && m.body().contains("Booking ID: " + booking.reference())
+                            && m.body().contains("Booking ID: " + reference)
                             && m.body().contains("Seats: A1, A2")));
             verify(emailSender, times(1)).send(argThat((EmailMessage m) ->
                     m.to().equals(email) && m.subject().startsWith("Booking cancelled: ")

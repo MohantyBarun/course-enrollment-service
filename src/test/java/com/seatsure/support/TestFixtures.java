@@ -7,6 +7,11 @@ import com.seatsure.dto.AdminDtos.ScreenRequest;
 import com.seatsure.dto.AdminDtos.ShowRequest;
 import com.seatsure.dto.AuthDtos.RegisterRequest;
 import com.seatsure.dto.AuthDtos.TokenResponse;
+import com.seatsure.dto.CheckoutDtos.HoldView;
+import com.seatsure.dto.CheckoutDtos.PaymentStarted;
+import com.seatsure.payment.PaymentService;
+import com.seatsure.service.HoldService;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.seatsure.entity.Certificate;
 import com.seatsure.entity.Seat;
 import com.seatsure.entity.SeatCategory;
@@ -41,6 +46,9 @@ public class TestFixtures {
     @Autowired private AuthService auth;
     @Autowired private CityRepository cities;
     @Autowired private SeatRepository seats;
+    @Autowired private HoldService holds;
+    @Autowired private PaymentService payments;
+    @Autowired private JdbcTemplate jdbc;
 
     public record Screen(Long cinemaId, Long screenId, List<Long> seatIds) {
     }
@@ -91,5 +99,21 @@ public class TestFixtures {
 
     public TokenResponse customer() {
         return auth.register(new RegisterRequest("Test Customer", unique("customer") + "@seatsure.test", null, PASSWORD));
+    }
+
+    /**
+     * Books through the real checkout: hold the seats, start a payment, and process the gateway's
+     * "succeeded" outcome (directly, without waiting for the webhook to travel over HTTP).
+     */
+    public String book(Long userId, Long showId, List<Long> seatIds) {
+        HoldView hold = holds.create(userId, showId, seatIds);
+        PaymentStarted payment = payments.start(userId, hold.holdId());
+        payments.onSucceeded(payment.gatewayRef(), payment.amountPaise());
+        return holds.get(userId, hold.holdId()).bookingReference();
+    }
+
+    /** Makes a hold look 10 minutes old, so the next expiry sweep picks it up. */
+    public void ageOut(Long holdId) {
+        jdbc.update("UPDATE seat_holds SET expires_at = now() - interval '1 second' WHERE id = ?", holdId);
     }
 }

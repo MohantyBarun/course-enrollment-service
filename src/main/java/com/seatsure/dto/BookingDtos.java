@@ -17,14 +17,6 @@ public final class BookingDtos {
     private BookingDtos() {
     }
 
-    public static final int MAX_SEATS_PER_BOOKING = 10;
-
-    public record BookRequest(
-            @NotEmpty(message = "Pick at least one seat")
-            @Size(max = MAX_SEATS_PER_BOOKING, message = "You can book up to " + MAX_SEATS_PER_BOOKING + " seats at a time")
-            List<@NotNull Long> seatIds) {
-    }
-
     public record CancelRequest(@Size(max = 200) String reason) {
     }
 

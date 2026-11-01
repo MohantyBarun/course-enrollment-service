@@ -1,9 +1,14 @@
 package com.seatsure.controller;
 
 import com.seatsure.config.AppConfig;
-import com.seatsure.dto.BookingDtos.BookingView;
-import com.seatsure.entity.BookingStatus;
+import com.seatsure.dto.CheckoutDtos.HoldView;
+import com.seatsure.entity.SeatHold;
 import com.seatsure.entity.ShowFormat;
+import com.seatsure.payment.PaymentService;
+import com.seatsure.payment.PaymentWebhookService;
+import com.seatsure.payment.mock.MockPaymentGateway;
+import com.seatsure.service.HoldService;
+import com.seatsure.service.WaitlistService;
 import com.seatsure.service.AdminCatalogService;
 import com.seatsure.service.BookingService;
 import com.seatsure.service.CatalogService;
@@ -23,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static com.seatsure.controller.JwtTestTokens.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -33,12 +39,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Who may call what: browsing is public, booking is for customers, /admin is for admins. */
-@WebMvcTest({CatalogController.class, BookingController.class, AdminController.class})
+@WebMvcTest({CatalogController.class, BookingController.class, CheckoutController.class, AdminController.class})
 @Import({AppConfig.class, JwtUtil.class})
 @TestPropertySource(properties = {JWT_PROPERTIES_SECRET, "jwt.access.expiration=900000"})
 class AccessRulesTest {
 
-    private static final String BOOK_BODY = "{\"seatIds\":[1,2]}";
+    private static final String HOLD_BODY = "{\"seatIds\":[1,2]}";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private JwtUtil jwtUtil;
@@ -47,6 +53,11 @@ class AccessRulesTest {
     @MockitoBean private BookingService bookings;
     @MockitoBean private AdminCatalogService adminCatalog;
     @MockitoBean private DashboardService dashboard;
+    @MockitoBean private HoldService holds;
+    @MockitoBean private PaymentService payments;
+    @MockitoBean private MockPaymentGateway mockGateway;
+    @MockitoBean private PaymentWebhookService webhooks;
+    @MockitoBean private WaitlistService waitlist;
 
     @Test
     void browsing_isPublic() throws Exception {
@@ -61,31 +72,41 @@ class AccessRulesTest {
     }
 
     @Test
-    void booking_withoutToken_is401() throws Exception {
-        mockMvc.perform(post("/shows/1/bookings").contentType(MediaType.APPLICATION_JSON).content(BOOK_BODY))
+    void checkout_withoutToken_is401() throws Exception {
+        mockMvc.perform(post("/shows/1/holds").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/bookings/me")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/waitlist/me")).andExpect(status().isUnauthorized());
     }
 
     @Test
-    @DisplayName("the booking is made for the user in the token")
-    void booking_asCustomer_usesTokenUser() throws Exception {
-        when(bookings.book(eq(CUSTOMER_ID), eq(1L), anyList())).thenReturn(new BookingView("SS2345678A",
-                BookingStatus.CONFIRMED, 1L, 1L, "Movie", null, "Cinema", "Pune", "Audi 1", Instant.now(),
-                ShowFormat.TWO_D, List.of(), 20_000, 2_500, 22_500, Instant.now(), null, null, true));
+    @DisplayName("the hold is made for the user in the token")
+    void hold_asCustomer_usesTokenUser() throws Exception {
+        when(holds.create(eq(CUSTOMER_ID), eq(1L), anyList())).thenReturn(new HoldView(42L, SeatHold.Status.ACTIVE,
+                SeatHold.Source.CUSTOMER, 1L, "Movie", "Cinema", "Audi 1", Instant.now(), ShowFormat.TWO_D, List.of(),
+                20_000, 2_500, 22_500, Instant.now(), null, null));
 
-        mockMvc.perform(post("/shows/1/bookings").header("Authorization", customer(jwtUtil))
-                        .contentType(MediaType.APPLICATION_JSON).content(BOOK_BODY))
+        mockMvc.perform(post("/shows/1/holds").header("Authorization", customer(jwtUtil))
+                        .contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isCreated())
-                .andExpect(header().string("Location", "/bookings/SS2345678A"));
-        verify(bookings).book(eq(CUSTOMER_ID), eq(1L), anyList());
+                .andExpect(header().string("Location", "/holds/42"));
+        verify(holds).create(eq(CUSTOMER_ID), eq(1L), anyList());
     }
 
     @Test
-    void booking_tooManySeats_is400() throws Exception {
-        mockMvc.perform(post("/shows/1/bookings").header("Authorization", customer(jwtUtil))
+    void hold_tooManySeats_is400() throws Exception {
+        mockMvc.perform(post("/shows/1/holds").header("Authorization", customer(jwtUtil))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"seatIds\":[1,2,3,4,5,6,7,8,9,10,11]}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("the webhook needs no JWT (it's authenticated by its signature)")
+    void webhook_isReachableWithoutToken() throws Exception {
+        when(webhooks.handle(any(), any())).thenReturn(PaymentWebhookService.Result.PROCESSED);
+
+        mockMvc.perform(post("/webhooks/payments").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -98,8 +119,8 @@ class AccessRulesTest {
 
     @Test
     void customerRoutes_forbiddenToAdmins() throws Exception {
-        mockMvc.perform(post("/shows/1/bookings").header("Authorization", admin(jwtUtil))
-                        .contentType(MediaType.APPLICATION_JSON).content(BOOK_BODY))
+        mockMvc.perform(post("/shows/1/holds").header("Authorization", admin(jwtUtil))
+                        .contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isForbidden());
     }
 

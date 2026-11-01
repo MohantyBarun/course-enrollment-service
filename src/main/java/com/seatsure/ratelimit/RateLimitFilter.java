@@ -55,8 +55,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = pathOf(request);
+        // Webhooks come from the payment gateway (signed, and retried by it), not from visitors
         return HttpMethod.OPTIONS.matches(request.getMethod())
-                || path.startsWith("/actuator") || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs");
+                || path.startsWith("/actuator") || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs")
+                || path.startsWith("/webhooks/");
     }
 
     @Override

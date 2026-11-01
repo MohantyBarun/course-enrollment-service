@@ -1,9 +1,7 @@
 package com.seatsure.repository;
 
 import com.seatsure.entity.Show;
-import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -20,16 +18,21 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
     Optional<Show> findDetailed(@Param("id") Long id);
 
     /**
-     * Shared lock on the show row, held for the whole booking. Bookings don't block each other (shared
-     * locks are compatible), but a show cancellation ({@link #findByIdForUpdate}) waits for bookings in
-     * flight and then blocks new ones, so no booking can slip in after the cancellation's sweep.
+     * Shared lock on the show row, held while seats are held or paid for. These don't block each
+     * other (shared locks are compatible), but a show cancellation ({@link #lockForCancellation})
+     * waits for them and then blocks new ones, so nothing slips in after the cancellation's sweep.
      */
     @Query(value = "SELECT id FROM shows WHERE id = :id FOR SHARE", nativeQuery = true)
     Optional<Long> lockForShare(@Param("id") Long id);
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT s FROM Show s WHERE s.id = :id")
-    Optional<Show> findByIdForUpdate(@Param("id") Long id);
+    /**
+     * FOR NO KEY UPDATE, not FOR UPDATE: it conflicts with FOR SHARE (new holds and payments wait),
+     * but not with the FOR KEY SHARE lock that inserting a row referencing the show takes. With FOR
+     * UPDATE, a cancellation waiting on a booking that is itself inserting a waitlist hold for this
+     * show would deadlock with it.
+     */
+    @Query(value = "SELECT id FROM shows WHERE id = :id FOR NO KEY UPDATE", nativeQuery = true)
+    Optional<Long> lockForCancellation(@Param("id") Long id);
 
     /** Scheduled shows of a movie in a city within [from, to), for the "pick a showtime" page. */
     @Query("""

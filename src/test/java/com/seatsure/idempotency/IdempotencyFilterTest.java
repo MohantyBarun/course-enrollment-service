@@ -62,7 +62,7 @@ class IdempotencyFilterTest {
             HttpServletResponse http = (HttpServletResponse) res;
             http.setStatus(status);
             http.setContentType("application/json");
-            http.setHeader("Location", "http://localhost/bookings/SS42");
+            http.setHeader("Location", "http://localhost/holds/42");
             http.getWriter().write(responseBody);
         };
     }
@@ -70,7 +70,7 @@ class IdempotencyFilterTest {
     @Test
     void withoutHeader_passesThrough() throws Exception {
         AtomicReference<String> seen = new AtomicReference<>();
-        filter.doFilter(post("/shows/7/bookings", null, BODY), new MockHttpServletResponse(), handler(201, "{}", seen));
+        filter.doFilter(post("/shows/7/holds", null, BODY), new MockHttpServletResponse(), handler(201, "{}", seen));
 
         assertThat(seen.get()).isEqualTo(BODY);
         verifyNoInteractions(service);
@@ -90,12 +90,12 @@ class IdempotencyFilterTest {
         AtomicReference<String> seen = new AtomicReference<>();
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), response, handler(201, "{\"id\":42}", seen));
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), response, handler(201, "{\"id\":42}", seen));
 
         assertThat(seen.get()).as("the controller still gets the full body").isEqualTo(BODY);
         assertThat(response.getStatus()).isEqualTo(201);
         assertThat(response.getContentAsString()).isEqualTo("{\"id\":42}");
-        verify(service).complete(7L, 201, "{\"id\":42}", "application/json", "http://localhost/bookings/SS42");
+        verify(service).complete(7L, 201, "{\"id\":42}", "application/json", "http://localhost/holds/42");
         verify(service, never()).release(anyLong());
     }
 
@@ -113,7 +113,7 @@ class IdempotencyFilterTest {
     void serverError_releasesTheKeySoTheClientCanRetry() throws Exception {
         when(service.claim(anyString(), eq(KEY), anyString())).thenReturn(new Claim.Acquired(7L));
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), new MockHttpServletResponse(),
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), new MockHttpServletResponse(),
                 handler(500, "{\"error\":\"boom\"}", new AtomicReference<>()));
 
         verify(service).release(7L);
@@ -124,7 +124,7 @@ class IdempotencyFilterTest {
     void clientError_isStoredAndReplayed() throws Exception {
         when(service.claim(anyString(), eq(KEY), anyString())).thenReturn(new Claim.Acquired(7L));
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), new MockHttpServletResponse(),
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), new MockHttpServletResponse(),
                 handler(409, "{\"error\":\"duplicate\"}", new AtomicReference<>()));
 
         verify(service).complete(eq(7L), eq(409), anyString(), any(), any());
@@ -133,17 +133,17 @@ class IdempotencyFilterTest {
     @Test
     void retry_replaysTheStoredResponseWithoutRunningAgain() throws Exception {
         when(service.claim(anyString(), eq(KEY), anyString()))
-                .thenReturn(new Claim.Replay(201, "{\"id\":42}", "application/json", "http://localhost/bookings/SS42"));
+                .thenReturn(new Claim.Replay(201, "{\"id\":42}", "application/json", "http://localhost/holds/42"));
         AtomicReference<String> seen = new AtomicReference<>();
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), response, handler(201, "{}", seen));
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), response, handler(201, "{}", seen));
 
         assertThat(seen.get()).as("controller not called").isNull();
         assertThat(response.getStatus()).isEqualTo(201);
         assertThat(response.getContentAsString()).isEqualTo("{\"id\":42}");
         assertThat(response.getHeader(IdempotencyFilter.REPLAYED_HEADER)).isEqualTo("true");
-        assertThat(response.getHeader("Location")).isEqualTo("http://localhost/bookings/SS42");
+        assertThat(response.getHeader("Location")).isEqualTo("http://localhost/holds/42");
     }
 
     @Test
@@ -151,7 +151,7 @@ class IdempotencyFilterTest {
         when(service.claim(anyString(), eq(KEY), anyString())).thenReturn(new Claim.InProgress());
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), response, handler(201, "{}", new AtomicReference<>()));
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), response, handler(201, "{}", new AtomicReference<>()));
 
         assertThat(response.getStatus()).isEqualTo(409);
     }
@@ -161,7 +161,7 @@ class IdempotencyFilterTest {
         when(service.claim(anyString(), eq(KEY), anyString())).thenReturn(new Claim.Mismatch());
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), response, handler(201, "{}", new AtomicReference<>()));
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), response, handler(201, "{}", new AtomicReference<>()));
 
         assertThat(response.getStatus()).isEqualTo(422);
     }
@@ -170,9 +170,9 @@ class IdempotencyFilterTest {
     void sameRequest_hashesTheSame_differentBody_doesNot() throws Exception {
         when(service.claim(anyString(), eq(KEY), anyString())).thenReturn(new Claim.InProgress());
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), new MockHttpServletResponse(), (q, s) -> { });
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), new MockHttpServletResponse(), (q, s) -> { });
-        filter.doFilter(post("/shows/7/bookings", KEY, "{\"name\":\"Jane\"}"), new MockHttpServletResponse(), (q, s) -> { });
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), new MockHttpServletResponse(), (q, s) -> { });
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), new MockHttpServletResponse(), (q, s) -> { });
+        filter.doFilter(post("/shows/7/holds", KEY, "{\"name\":\"Jane\"}"), new MockHttpServletResponse(), (q, s) -> { });
 
         var hashes = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(service, times(3)).claim(anyString(), eq(KEY), hashes.capture());
@@ -184,7 +184,7 @@ class IdempotencyFilterTest {
     void malformedKey_gets400() throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilter(post("/shows/7/bookings", "bad key!", BODY), response, handler(201, "{}", new AtomicReference<>()));
+        filter.doFilter(post("/shows/7/holds", "bad key!", BODY), response, handler(201, "{}", new AtomicReference<>()));
 
         assertThat(response.getStatus()).isEqualTo(400);
         verifyNoInteractions(service);
@@ -195,7 +195,7 @@ class IdempotencyFilterTest {
         SecurityContextHolder.clearContext();
         AtomicReference<String> seen = new AtomicReference<>();
 
-        filter.doFilter(post("/shows/7/bookings", KEY, BODY), new MockHttpServletResponse(), handler(403, "{}", seen));
+        filter.doFilter(post("/shows/7/holds", KEY, BODY), new MockHttpServletResponse(), handler(403, "{}", seen));
 
         verifyNoInteractions(service);
     }

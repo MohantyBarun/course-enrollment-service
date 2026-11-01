@@ -9,17 +9,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.lang.annotation.*;
 
 /**
- * The whole application against a real PostgreSQL (Testcontainers). Classes using this share one
+ * The whole application, on a real port (the mock payment gateway calls its webhook over HTTP), against
+ * a real PostgreSQL (Testcontainers). Classes using this share one
  * Spring context (and one container). Skipped when Docker isn't available; CI always runs them.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-@SpringBootTest(properties = {
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "jwt.secret=integration-test-secret-that-is-longer-than-sixty-four-bytes-for-hs512-signing",
         "app.rate-limit.login-per-minute=3",
         "app.metrics.password=test-metrics-password",
         "app.outbox.poll-interval=PT1S",
+        // Tests expire holds themselves (expireDue); a background sweep could claim them mid-test
+        "app.holds.expiry-initial-delay=PT1H",
         "spring.datasource.hikari.maximum-pool-size=20"
 })
 @AutoConfigureMockMvc

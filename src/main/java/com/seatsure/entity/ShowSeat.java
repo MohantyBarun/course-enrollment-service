@@ -5,7 +5,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** A seat's state for one show: the row that concurrent bookings lock and compete for. */
+/**
+ * A seat's state for one show: the row that concurrent requests lock and compete for.
+ * AVAILABLE -> HELD (by a hold) -> BOOKED (by a booking), and back to AVAILABLE on expiry or cancellation.
+ */
 @Entity
 @Getter
 @Setter
@@ -30,16 +33,28 @@ public class ShowSeat {
     private ShowSeatStatus status = ShowSeatStatus.AVAILABLE;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "hold_id")
+    private SeatHold hold;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "booking_id")
     private Booking booking;
+
+    public void hold(SeatHold hold) {
+        this.status = ShowSeatStatus.HELD;
+        this.hold = hold;
+        this.booking = null;
+    }
 
     public void book(Booking booking) {
         this.status = ShowSeatStatus.BOOKED;
         this.booking = booking;
+        this.hold = null;
     }
 
     public void release() {
         this.status = ShowSeatStatus.AVAILABLE;
         this.booking = null;
+        this.hold = null;
     }
 }

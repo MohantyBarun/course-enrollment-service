@@ -175,8 +175,8 @@ public class DemoDataService {
         log.info("Demo mode: resetting data");
         entityManager.flush();
         entityManager.clear();
-        // Cascades to screens, seats, shows, prices, show seats, bookings and booking seats
-        jdbc.execute("TRUNCATE movies, cinemas CASCADE");
+        // Cascades to screens, seats, shows, prices, show seats, holds, payments, waitlists and bookings
+        jdbc.execute("TRUNCATE movies, cinemas, payment_webhook_events, mock_gateway_events CASCADE");
         jdbc.update("DELETE FROM users WHERE role = ?", Roles.ROLE_CUSTOMER.name());
         ensureAccount("Demo Admin", demoAdminEmail, Roles.ROLE_ADMIN);
         seed();

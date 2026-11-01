@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * Topology, declared on first connection:
  * <pre>
- * seatsure.events (topic) --user.registered / booking.confirmed / booking.cancelled / notification.test--> notifications.email
+ * seatsure.events (topic) --user.*, booking.*, waitlist.*, payment.refunded, notification.test--> notifications.email
  * notifications.email --rejected after retries--> seatsure.events.dlx --> notifications.email.dlq
  * </pre>
  */
@@ -51,6 +51,8 @@ public class RabbitMessagingConfig {
                 BindingBuilder.bind(emailQueue()).to(eventsExchange()).with(OutboxEvents.USER_REGISTERED),
                 BindingBuilder.bind(emailQueue()).to(eventsExchange()).with(OutboxEvents.BOOKING_CONFIRMED),
                 BindingBuilder.bind(emailQueue()).to(eventsExchange()).with(OutboxEvents.BOOKING_CANCELLED),
+                BindingBuilder.bind(emailQueue()).to(eventsExchange()).with(OutboxEvents.SEATS_OFFERED),
+                BindingBuilder.bind(emailQueue()).to(eventsExchange()).with(OutboxEvents.PAYMENT_REFUNDED),
                 BindingBuilder.bind(emailQueue()).to(eventsExchange()).with(OutboxEvents.TEST_EMAIL),
                 BindingBuilder.bind(emailDeadLetterQueue()).to(deadLetterExchange()).with(EMAIL_DEAD_LETTER_QUEUE));
     }
