@@ -18,10 +18,10 @@ services:
     envVars:
       - key: SPRING_PROFILES_ACTIVE
         value: prod
-      # Public demo: seeds sample data and enables "Try as Admin/Student" on the login page
+      # Public demo: seeds cinemas, movies, shows and bookings; enables "Try as Admin/Customer"
       - key: DEMO_ENABLED
         value: "true"
-      # Nightly reset (03:00 IST) so visitors' changes don't accumulate; wipes students & academic data, keeps admins
+      # Nightly reset (03:00 IST): reseeds shows around the new day; wipes catalog, bookings and customers, keeps admins
       - key: DEMO_RESET_CRON
         value: "0 0 3 * * *"
       - key: JWT_SECRET
