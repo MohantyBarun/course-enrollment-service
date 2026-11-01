@@ -7,6 +7,7 @@ import com.seatsure.entity.*;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.ConflictException;
 import com.seatsure.exception.ResourceNotFoundException;
+import com.seatsure.realtime.SeatEvents;
 import com.seatsure.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class AdminCatalogService {
     private final BookingService bookingService;
     private final SeatHoldRepository holds;
     private final WaitlistService waitlist;
+    private final SeatEvents seatEvents;
     private final Clock clock;
     private final ZoneId zone;
 
@@ -249,6 +251,7 @@ public class AdminCatalogService {
         }
         int cancelled = bookingService.cancelAllForShow(showId, "Show cancelled by the cinema: " + reason.trim());
         int closed = waitlist.closeForShow(showId, now);
+        seatEvents.reload(showId); // every open seat map refetches (and sees the show is off)
         log.info("Show {} cancelled; {} booking(s) cancelled, {} waitlist entr(ies) closed", showId, cancelled, closed);
         return new ShowCancelled(showId, cancelled);
     }

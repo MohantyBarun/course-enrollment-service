@@ -58,6 +58,12 @@ public class CatalogService {
         return cities.findById(cityId).orElseThrow(() -> new ResourceNotFoundException("City not found: " + cityId));
     }
 
+    public void requireShow(Long showId) {
+        if (!shows.existsById(showId)) {
+            throw new ResourceNotFoundException("Show not found: " + showId);
+        }
+    }
+
     public Movie movie(Long movieId) {
         return movies.findById(movieId).orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + movieId));
     }

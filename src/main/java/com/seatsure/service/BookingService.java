@@ -10,6 +10,7 @@ import com.seatsure.exception.ResourceNotFoundException;
 import com.seatsure.outbox.OutboxEvents;
 import com.seatsure.outbox.OutboxService;
 import com.seatsure.payment.Refunds;
+import com.seatsure.realtime.SeatEvents;
 import com.seatsure.repository.BookingRepository;
 import com.seatsure.repository.ShowSeatRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -44,11 +45,13 @@ public class BookingService {
     private final WaitlistService waitlist;
     private final Refunds refunds;
     private final OutboxService outbox;
+    private final SeatEvents seatEvents;
     private final Clock clock;
     private final Duration cancellationCutoff;
 
     public BookingService(ShowSeatRepository showSeats, BookingRepository bookings, Pricing pricing,
-                          WaitlistService waitlist, Refunds refunds, OutboxService outbox, Clock clock,
+                          WaitlistService waitlist, Refunds refunds, OutboxService outbox, SeatEvents seatEvents,
+                          Clock clock,
                           @Value("${app.booking.cancellation-cutoff:PT2H}") Duration cancellationCutoff) {
         this.showSeats = showSeats;
         this.bookings = bookings;
@@ -56,6 +59,7 @@ public class BookingService {
         this.waitlist = waitlist;
         this.refunds = refunds;
         this.outbox = outbox;
+        this.seatEvents = seatEvents;
         this.clock = clock;
         this.cancellationCutoff = cancellationCutoff;
     }
@@ -83,6 +87,7 @@ public class BookingService {
         booking.setPayment(payment);
         bookings.save(booking);
         seats.forEach(ss -> ss.book(booking));
+        seatEvents.seatsChanged(show.getId(), seats);
 
         User user = hold.getUser();
         outbox.record("Booking", booking.getId(), OutboxEvents.BOOKING_CONFIRMED, new OutboxEvents.BookingConfirmed(

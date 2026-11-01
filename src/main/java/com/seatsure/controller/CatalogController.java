@@ -1,7 +1,12 @@
 package com.seatsure.controller;
 
 import com.seatsure.dto.CatalogDtos.*;
+import com.seatsure.realtime.SeatStreams;
 import com.seatsure.service.CatalogService;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,6 +25,7 @@ import java.util.List;
 public class CatalogController {
 
     private final CatalogService catalog;
+    private final SeatStreams seatStreams;
 
     @Operation(summary = "Cities with cinemas")
     @GetMapping("/cities")
@@ -58,5 +64,17 @@ public class CatalogController {
     @GetMapping("/shows/{showId}/seats")
     public SeatMap seats(@PathVariable Long showId) {
         return catalog.seatMap(showId);
+    }
+
+    @Operation(summary = "Live seat changes (Server-Sent Events)",
+            description = "Events: ready (connected; now fetch /seats), seats ({showId, changes:[{seatId, status}]}, "
+                    + "sent when a change commits), reload (refetch /seats). Browsers reconnect automatically.")
+    @GetMapping(value = "/shows/{showId}/seats/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> seatStream(@PathVariable Long showId) {
+        catalog.requireShow(showId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache")
+                .header("X-Accel-Buffering", "no") // ask proxies not to buffer the stream
+                .body(seatStreams.subscribe(showId));
     }
 }
