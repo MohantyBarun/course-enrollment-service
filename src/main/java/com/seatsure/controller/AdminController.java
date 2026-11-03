@@ -1,5 +1,6 @@
 package com.seatsure.controller;
 
+import com.seatsure.demo.DemoPrivacy;
 import com.seatsure.dto.AdminDtos.*;
 import com.seatsure.dto.CatalogDtos.CityView;
 import com.seatsure.dto.CatalogDtos.MovieDetail;
@@ -7,6 +8,8 @@ import com.seatsure.dto.PagedResponseDTO;
 import com.seatsure.service.AdminCatalogService;
 import com.seatsure.service.CatalogService;
 import com.seatsure.service.DashboardService;
+import com.seatsure.util.CurrentUser;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -15,6 +18,7 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,6 +35,7 @@ public class AdminController {
     private final AdminCatalogService catalog;
     private final CatalogService catalogService;
     private final DashboardService dashboard;
+    private final DemoPrivacy demoPrivacy;
 
     @Operation(summary = "Sales dashboard")
     @GetMapping("/dashboard")
@@ -38,11 +43,14 @@ public class AdminController {
         return dashboard.dashboard();
     }
 
-    @Operation(summary = "Latest bookings across all cinemas")
+    @Operation(summary = "Latest bookings across all cinemas",
+            description = "On the public demo, the shared demo admin sees real customers' names and emails masked.")
     @GetMapping("/bookings")
     public PagedResponseDTO<AdminBookingView> bookings(@RequestParam(defaultValue = "0") @Min(0) int page,
-                                                       @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return dashboard.recentBookings(page, size);
+                                                       @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+                                                       @Parameter(hidden = true) @AuthenticationPrincipal CurrentUser viewer) {
+        PagedResponseDTO<AdminBookingView> bookings = dashboard.recentBookings(page, size);
+        return demoPrivacy.appliesTo(viewer) ? bookings.map(demoPrivacy::mask) : bookings;
     }
 
     @Operation(summary = "Every movie, newest release first, with where customers can see it")

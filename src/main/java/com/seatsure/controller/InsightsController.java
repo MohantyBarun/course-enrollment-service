@@ -1,13 +1,19 @@
 package com.seatsure.controller;
 
+import com.seatsure.demo.DemoPrivacy;
 import com.seatsure.insights.NotificationFeedService;
 import com.seatsure.insights.SystemStatusService;
 import com.seatsure.insights.TestEmailService;
+import com.seatsure.ratelimit.ClientIpDiagnostics;
+import com.seatsure.ratelimit.ClientIpResolver;
+import com.seatsure.util.CurrentUser;
+import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -25,14 +31,22 @@ public class InsightsController {
     private final NotificationFeedService notificationFeed;
     private final SystemStatusService systemStatus;
     private final TestEmailService testEmail;
+    private final ClientIpResolver clientIp;
+    private final DemoPrivacy demoPrivacy;
 
     public record TestEmailRequest(String to) {
     }
 
     @Operation(summary = "Latest notifications and where each one is in the outbox pipeline (admin)")
     @GetMapping("/notifications")
-    public NotificationFeedService.Feed notifications() {
-        return notificationFeed.latest();
+    public NotificationFeedService.Feed notifications(
+            @io.swagger.v3.oas.annotations.Parameter(hidden = true) @AuthenticationPrincipal CurrentUser viewer) {
+        NotificationFeedService.Feed feed = notificationFeed.latest();
+        if (!demoPrivacy.appliesTo(viewer)) {
+            return feed;
+        }
+        return new NotificationFeedService.Feed(feed.emailMode(), feed.transport(), feed.allowedRecipients(),
+                feed.entries().stream().map(demoPrivacy::mask).toList());
     }
 
     @Operation(summary = "Queue a test email through the outbox (admin)",
@@ -49,5 +63,13 @@ public class InsightsController {
     @GetMapping("/system")
     public SystemStatusService.Snapshot system() {
         return systemStatus.snapshot();
+    }
+
+    @Operation(summary = "This request's X-Forwarded-For chain and which entry rate limits treat as the client (admin)",
+            description = "For checking app.client-ip.trusted-proxies: send a made-up X-Forwarded-For; it must "
+                    + "not be marked as the client. Addresses are masked.")
+    @GetMapping("/system/client-ip")
+    public ClientIpDiagnostics.Report clientIp(HttpServletRequest request) {
+        return ClientIpDiagnostics.report(request, clientIp);
     }
 }

@@ -2,6 +2,7 @@ package com.seatsure.config;
 
 import com.seatsure.idempotency.IdempotencyFilter;
 import com.seatsure.idempotency.IdempotencyService;
+import com.seatsure.ratelimit.ClientIpResolver;
 import com.seatsure.ratelimit.InMemoryRateLimiter;
 import com.seatsure.ratelimit.RateLimitFilter;
 import com.seatsure.ratelimit.RateLimitProperties;
@@ -38,11 +39,17 @@ public class HttpProtectionConfig {
                 : new InMemoryRateLimiter(Clock.systemUTC());
     }
 
+    /** How many proxies in front of the app append to X-Forwarded-For (Render: see application-prod). */
+    @Bean
+    public ClientIpResolver clientIpResolver(@Value("${app.client-ip.trusted-proxies:0}") int trustedProxies) {
+        return new ClientIpResolver(trustedProxies);
+    }
+
     @Bean
     @ConditionalOnProperty(name = "app.rate-limit.enabled", havingValue = "true", matchIfMissing = true)
-    public RateLimitFilter rateLimitFilter(RateLimiter rateLimiter, RateLimitProperties properties,
-                                           MeterRegistry meterRegistry) {
-        return new RateLimitFilter(rateLimiter, properties, meterRegistry);
+    public RateLimitFilter rateLimitFilter(RateLimiter rateLimiter, ClientIpResolver clientIp,
+                                           RateLimitProperties properties, MeterRegistry meterRegistry) {
+        return new RateLimitFilter(rateLimiter, clientIp, properties, meterRegistry);
     }
 
     @Bean

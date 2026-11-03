@@ -16,6 +16,11 @@ public record PagedResponseDTO<T>(
         int totalPages,
         boolean last
 ) {
+    /** The same page with each item transformed. */
+    public <R> PagedResponseDTO<R> map(java.util.function.Function<T, R> mapper) {
+        return new PagedResponseDTO<>(content.stream().map(mapper).toList(), page, size, totalElements, totalPages, last);
+    }
+
     public static <T> PagedResponseDTO<T> from(Page<T> page) {
         return new PagedResponseDTO<>(
                 page.getContent(),

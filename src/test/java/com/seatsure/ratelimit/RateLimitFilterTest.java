@@ -14,7 +14,7 @@ class RateLimitFilterTest {
 
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final RateLimitFilter filter = new RateLimitFilter(new InMemoryRateLimiter(Clock.systemUTC()),
-            new RateLimitProperties(true, 2, 5, 20, 30, 5), meters);
+            new ClientIpResolver(0), new RateLimitProperties(true, 2, 5, 20, 30, 5), meters);
 
     private MockHttpServletResponse send(String method, String path, String ip) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
