@@ -2,7 +2,7 @@ package com.seatsure.notification;
 
 import lombok.extern.slf4j.Slf4j;
 
-/** Used when SMTP isn't configured, and on a demo without an allowlist. Never logs the body (it may hold a password). */
+/** Used when SMTP isn't configured, and on a demo without an allowlist. Logs the subject and masked recipient, never the body. */
 @Slf4j
 public class LoggingEmailSender implements EmailSender {
 

@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 import java.util.UUID;
 
-/** What happened to each notification: shown on the admin "Emails" page. Passwords are masked. */
+/** What happened to each notification (sent, or only logged, and why): shown on the admin "Emails" page. */
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)

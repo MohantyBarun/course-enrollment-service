@@ -15,8 +15,8 @@ import java.security.SecureRandom;
 import java.util.Base64;
 
 /**
- * AES-256-GCM encryption for sensitive values that have to be stored or queued, such as a temporary
- * password waiting in the outbox to be emailed. Output is base64(iv || ciphertext || tag).
+ * AES-256-GCM encryption for sensitive values stored at rest, such as the responses kept for
+ * idempotent replays (they can contain personal data). Output is base64(iv || ciphertext || tag).
  */
 @Component
 public class SecretBox {
