@@ -36,7 +36,8 @@ public class CatalogController {
     @Operation(summary = "Home page for a city: now showing and coming soon")
     @GetMapping("/cities/{cityId}/home")
     public Home home(@PathVariable Long cityId) {
-        return new Home(CityView.of(catalog.city(cityId)), catalog.nowShowing(cityId), catalog.comingSoon());
+        List<MovieCard> nowShowing = catalog.nowShowing(cityId);
+        return new Home(CityView.of(catalog.city(cityId)), nowShowing, catalog.comingSoon(nowShowing));
     }
 
     @Operation(summary = "Movie details")

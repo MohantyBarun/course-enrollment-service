@@ -1,6 +1,6 @@
 import { apiRequest, newIdempotencyKey } from './client';
 import type {
-  AdminBookingView, AdminShowView, BookingView, CinemaView, City, Dashboard, Home, HoldView, MovieDetail, MovieRequest,
+  AdminBookingView, AdminMovie, AdminShowView, BookingView, CinemaView, City, Dashboard, Home, HoldView, MovieDetail, MovieRequest,
   NotificationFeed, Paged, PaymentStarted, RowSpec, ScreenView, SeatMap, ShowDetail, ShowRequest, Showtimes,
   SystemSnapshot, TokenResponse, UserView, WaitlistView,
 } from './types';
@@ -58,7 +58,7 @@ export const bookingApi = {
 export const adminApi = {
   dashboard: () => apiRequest<Dashboard>('/admin/dashboard'),
   bookings: (page = 0, size = 20) => apiRequest<Paged<AdminBookingView>>('/admin/bookings', { query: { page, size } }),
-  movies: () => apiRequest<MovieDetail[]>('/admin/movies'),
+  movies: () => apiRequest<AdminMovie[]>('/admin/movies'),
   createMovie: (body: MovieRequest) =>
     apiRequest<MovieDetail>('/admin/movies', { method: 'POST', body, idempotencyKey: newIdempotencyKey() }),
   updateMovie: (id: number, body: MovieRequest) => apiRequest<MovieDetail>(`/admin/movies/${id}`, { method: 'PUT', body }),

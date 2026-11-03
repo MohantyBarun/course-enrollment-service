@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
 import type { AdminShowView, CinemaView, MovieDetail, SeatCategory, ShowFormat } from '../../api/types';
@@ -15,10 +15,11 @@ export function istLocalToInstant(local: string): string {
   return new Date(`${local}:00+05:30`).toISOString();
 }
 
-function ScheduleForm({ cinema, date, movies, onClose, onSaved }: {
-  cinema: CinemaView; date: string; movies: MovieDetail[]; onClose: () => void; onSaved: () => void;
+function ScheduleForm({ cinema, date, movies, initialMovieId, onClose, onSaved }: {
+  cinema: CinemaView; date: string; movies: MovieDetail[]; initialMovieId?: number; onClose: () => void; onSaved: () => void;
 }) {
-  const [movieId, setMovieId] = useState(movies[0]?.id ?? 0);
+  const [movieId, setMovieId] = useState(
+    movies.some((m) => m.id === initialMovieId) ? initialMovieId! : movies[0]?.id ?? 0);
   const [screenId, setScreenId] = useState(cinema.screens[0]?.id ?? 0);
   const [time, setTime] = useState('18:30');
   const [format, setFormat] = useState<ShowFormat>('2D');
@@ -127,9 +128,12 @@ function CancelShowDialog({ show, onClose, onDone }: { show: AdminShowView; onCl
 export function AdminShowsPage() {
   const cinemas = useApi(adminApi.cinemas);
   const movies = useApi(adminApi.movies);
+  // "Schedule a show" on the Movies page links here with ?movie=<id>, which the form preselects
+  const [searchParams] = useSearchParams();
+  const requestedMovieId = Number(searchParams.get('movie')) || undefined;
   const [cinemaId, setCinemaId] = useState<number | null>(null);
   const [date, setDate] = useState(todayIst());
-  const [scheduling, setScheduling] = useState(false);
+  const [scheduling, setScheduling] = useState(requestedMovieId !== undefined);
   const [cancelling, setCancelling] = useState<AdminShowView | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -193,7 +197,8 @@ export function AdminShowsPage() {
         </ul>
       )}
       {scheduling && cinema && movies.data && (
-        <ScheduleForm cinema={cinema} date={date} movies={movies.data} onClose={() => setScheduling(false)} onSaved={shows.reload} />
+        <ScheduleForm cinema={cinema} date={date} movies={movies.data} initialMovieId={requestedMovieId}
+                      onClose={() => setScheduling(false)} onSaved={shows.reload} />
       )}
       {cancelling && (
         <CancelShowDialog show={cancelling} onClose={() => setCancelling(null)}

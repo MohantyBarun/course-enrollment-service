@@ -32,6 +32,22 @@ public final class AdminDtos {
             String posterUrl) {
     }
 
+    /** Where customers can find a movie: the rules of the customer home page, from the admin's side. */
+    public enum CustomerVisibility {
+        /** Has upcoming scheduled shows: listed under "now showing" in {@code showingIn}. */
+        NOW_SHOWING,
+        /** No upcoming shows, releasing today or later: listed under "coming soon" in every city. */
+        COMING_SOON,
+        /** Released and no upcoming shows: customers can't find it until a show is scheduled. */
+        HIDDEN
+    }
+
+    /** A movie in the admin catalogue, with what customers see of it. */
+    public record AdminMovie(Long id, String title, String synopsis, String language, Certificate certificate,
+                             List<String> genres, int durationMinutes, LocalDate releaseDate, String posterUrl,
+                             CustomerVisibility visibility, long upcomingShows, List<String> showingIn) {
+    }
+
     // ---------------------------------------------------------------- cinemas and screens
 
     public record CinemaRequest(@NotNull Long cityId, @NotBlank @Size(max = 120) String name,

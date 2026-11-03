@@ -18,8 +18,8 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
             """)
     List<Movie> findShowingInCity(@Param("cityId") Long cityId, @Param("now") Instant now);
 
-    /** "Coming soon": not released yet. */
-    List<Movie> findByReleaseDateAfterOrderByReleaseDateAsc(LocalDate date);
+    /** "Coming soon": releasing today or later. */
+    List<Movie> findByReleaseDateGreaterThanEqualOrderByReleaseDateAsc(LocalDate date);
 
     List<Movie> findAllByOrderByReleaseDateDesc();
 }
