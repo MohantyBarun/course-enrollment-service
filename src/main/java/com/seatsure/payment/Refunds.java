@@ -23,10 +23,16 @@ public class Refunds {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean refund(Payment payment, String reason, Instant now) {
-        if (payment == null || payment.getStatus() != Payment.Status.SUCCEEDED) {
+        return payment != null && refund(payment, payment.getAmountPaise(), reason, now);
+    }
+
+    /** Refunds a specific amount: what the gateway actually took, when that isn't what was due. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean refund(Payment payment, int amountPaise, String reason, Instant now) {
+        if (payment.getStatus() != Payment.Status.SUCCEEDED) {
             return false;
         }
-        gateway.refund(payment.getGatewayRef(), payment.getAmountPaise(), reason);
+        gateway.refund(payment.getGatewayRef(), amountPaise, reason);
         payment.moveTo(Payment.Status.REFUNDED, reason, now);
         log.info("Payment {} refunded: {}", payment.getGatewayRef(), reason);
         return true;

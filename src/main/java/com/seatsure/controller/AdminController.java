@@ -4,7 +4,7 @@ import com.seatsure.demo.DemoPrivacy;
 import com.seatsure.dto.AdminDtos.*;
 import com.seatsure.dto.CatalogDtos.CityView;
 import com.seatsure.dto.CatalogDtos.MovieDetail;
-import com.seatsure.dto.PagedResponseDTO;
+import com.seatsure.dto.PageView;
 import com.seatsure.service.MovieAdminService;
 import com.seatsure.service.ShowScheduleService;
 import com.seatsure.service.VenueAdminService;
@@ -50,10 +50,10 @@ public class AdminController {
     @Operation(summary = "Latest bookings across all cinemas",
             description = "On the public demo, the shared demo admin sees real customers' names and emails masked.")
     @GetMapping("/bookings")
-    public PagedResponseDTO<AdminBookingView> bookings(@RequestParam(defaultValue = "0") @Min(0) int page,
+    public PageView<AdminBookingView> bookings(@RequestParam(defaultValue = "0") @Min(0) int page,
                                                        @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
                                                        @Parameter(hidden = true) @AuthenticationPrincipal CurrentUser viewer) {
-        PagedResponseDTO<AdminBookingView> bookings = dashboard.recentBookings(page, size);
+        PageView<AdminBookingView> bookings = dashboard.recentBookings(page, size);
         return demoPrivacy.appliesTo(viewer) ? bookings.map(demoPrivacy::mask) : bookings;
     }
 

@@ -96,9 +96,10 @@ public class PaymentService {
             return;
         }
         if (amountPaise != payment.getAmountPaise()) {
-            // Never confirm on a mismatched amount: flag it and refund what was taken
+            // Never confirm on a mismatched amount: refund exactly what was taken (not what was due)
             payment.moveTo(Payment.Status.SUCCEEDED, null, now);
-            refunds.refund(payment, "Amount mismatch (" + amountPaise + " paid, " + payment.getAmountPaise() + " due)", now);
+            refunds.refund(payment, amountPaise,
+                    "Amount mismatch (" + amountPaise + " paid, " + payment.getAmountPaise() + " due)", now);
             log.error("Payment {} amount mismatch: got {}, expected {}", gatewayRef, amountPaise, payment.getAmountPaise());
             return;
         }

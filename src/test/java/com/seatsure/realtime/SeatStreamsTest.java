@@ -19,6 +19,17 @@ class SeatStreamsTest {
     }
 
     @Test
+    void closeAll_endsEveryStream_soShutdownDoesntWaitOnThem() {
+        SeatStreams streams = new SeatStreams(new SimpleMeterRegistry());
+        streams.subscribe(1L);
+        streams.subscribe(2L);
+
+        streams.closeAll();
+
+        assertThat(streams.openStreams()).isZero();
+    }
+
+    @Test
     void reloadAll_withNoStreams_isANoOp() {
         assertThat(new SeatStreams(new SimpleMeterRegistry()).reloadAll()).isZero();
     }
