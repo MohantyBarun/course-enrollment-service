@@ -16,4 +16,9 @@ public interface IdempotencyRecordRepository extends JpaRepository<IdempotencyRe
     @Modifying
     @Query("DELETE FROM IdempotencyRecord r WHERE r.expiresAt < :now")
     int deleteExpired(@Param("now") Instant now);
+
+    /** 0 when another request already removed it: the caller lost the race to reclaim the key. */
+    @Modifying
+    @Query("DELETE FROM IdempotencyRecord r WHERE r.id = :id")
+    int deleteRecord(@Param("id") Long id);
 }

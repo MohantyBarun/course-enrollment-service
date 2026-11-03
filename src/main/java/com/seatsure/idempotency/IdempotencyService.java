@@ -36,15 +36,19 @@ public class IdempotencyService {
     private final SecretBox secretBox;
     private final TransactionTemplate tx;
     private final Duration ttl;
+    private final Duration inProgressTimeout;
     private final Clock clock;
 
     public IdempotencyService(IdempotencyRecordRepository repository, SecretBox secretBox,
                               PlatformTransactionManager transactionManager,
-                              @Value("${app.idempotency.ttl:PT24H}") Duration ttl, Clock clock) {
+                              @Value("${app.idempotency.ttl:PT24H}") Duration ttl,
+                              @Value("${app.idempotency.in-progress-timeout:PT2M}") Duration inProgressTimeout,
+                              Clock clock) {
         this.repository = repository;
         this.secretBox = secretBox;
         this.tx = new TransactionTemplate(transactionManager);
         this.ttl = ttl;
+        this.inProgressTimeout = inProgressTimeout;
         this.clock = clock;
     }
 
@@ -66,15 +70,21 @@ public class IdempotencyService {
                 if (!record.getRequestHash().equals(requestHash)) {
                     return new Claim.Mismatch();
                 }
-                if (record.getStatus() == IdempotencyRecord.Status.IN_PROGRESS) {
+                if (record.getStatus() == IdempotencyRecord.Status.COMPLETED) {
+                    return new Claim.Replay(record.getResponseStatus(),
+                            record.getResponseBody() == null ? null : secretBox.decrypt(record.getResponseBody()),
+                            record.getResponseContentType(), record.getResponseLocation());
+                }
+                if (!isAbandoned(record, now)) {
                     return new Claim.InProgress();
                 }
-                return new Claim.Replay(record.getResponseStatus(),
-                        record.getResponseBody() == null ? null : secretBox.decrypt(record.getResponseBody()),
-                        record.getResponseContentType(), record.getResponseLocation());
+                // The instance running it died between committing the work and storing the response
+                // (a deploy or crash). Run it again rather than answering 409 for the next 24 hours.
+                log.warn("Idempotency key {} was in progress since {}; reclaiming it", record.getId(), record.getCreatedAt());
             }
-            repository.delete(record);
-            repository.flush();
+            if (repository.deleteRecord(record.getId()) == 0) {
+                return new Claim.InProgress(); // another retry reclaimed it a moment ago
+            }
         }
         IdempotencyRecord record = new IdempotencyRecord();
         record.setOwner(owner);
@@ -84,6 +94,16 @@ public class IdempotencyService {
         record.setCreatedAt(now);
         record.setExpiresAt(now.plus(ttl));
         return new Claim.Acquired(repository.saveAndFlush(record).getId());
+    }
+
+    /**
+     * An in-progress key older than any request takes. Requests here finish in seconds, so a few
+     * minutes means the instance running it is gone. Redoing it is safe for every endpoint behind
+     * this filter: each re-checks its own state (a hold that's already paid, a booking that's
+     * already cancelled) and answers accordingly.
+     */
+    private boolean isAbandoned(IdempotencyRecord record, Instant now) {
+        return record.getCreatedAt().plus(inProgressTimeout).isBefore(now);
     }
 
     public void complete(Long recordId, int status, String body, String contentType, String location) {
