@@ -16,7 +16,7 @@ import java.time.Instant;
 @Setter
 @NoArgsConstructor
 @Table(name = "seat_holds")
-public class SeatHold {
+public class SeatHold implements OwnedByUser {
 
     public enum Status { ACTIVE, CONVERTED, EXPIRED, RELEASED }
 

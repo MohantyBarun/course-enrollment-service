@@ -47,9 +47,9 @@ class SystemStatusServiceTest {
 
     @Test
     void http_countsAppTrafficButNotThePollingOfAdminAndActuator() {
-        request("/courses", "SUCCESS", 20);
-        request("/courses", "SUCCESS", 40);
-        request("/students/{id}", "CLIENT_ERROR", 10);
+        request("/cities", "SUCCESS", 20);
+        request("/cities", "SUCCESS", 40);
+        request("/movies/{movieId}", "CLIENT_ERROR", 10);
         request("/auth/login", "SERVER_ERROR", 90);
         request("/admin/system", "SUCCESS", 500);
         request("/actuator/health/liveness", "SUCCESS", 500);

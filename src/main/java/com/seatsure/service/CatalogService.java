@@ -55,17 +55,17 @@ public class CatalogService {
     }
 
     public City city(Long cityId) {
-        return cities.findById(cityId).orElseThrow(() -> new ResourceNotFoundException("City not found: " + cityId));
+        return cities.findById(cityId).orElseThrow(() -> ResourceNotFoundException.of("City", cityId));
     }
 
     public void requireShow(Long showId) {
         if (!shows.existsById(showId)) {
-            throw new ResourceNotFoundException("Show not found: " + showId);
+            throw ResourceNotFoundException.of("Show", showId);
         }
     }
 
     public Movie movie(Long movieId) {
-        return movies.findById(movieId).orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + movieId));
+        return movies.findById(movieId).orElseThrow(() -> ResourceNotFoundException.of("Movie", movieId));
     }
 
     /**
@@ -135,7 +135,7 @@ public class CatalogService {
     }
 
     public ShowDetail showDetail(Long showId) {
-        Show s = shows.findDetailed(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        Show s = shows.findDetailed(showId).orElseThrow(() -> ResourceNotFoundException.of("Show", showId));
         var cinema = s.getScreen().getCinema();
         return new ShowDetail(s.getId(), MovieCard.of(s.getMovie()),
                 new CinemaRef(cinema.getId(), cinema.getName(), cinema.getAddress(), cinema.getCity().getName()),
@@ -145,7 +145,7 @@ public class CatalogService {
 
     /** Not cached: it's the page where people race for seats, so it must be current. */
     public SeatMap seatMap(Long showId) {
-        Show show = shows.findById(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        Show show = shows.findById(showId).orElseThrow(() -> ResourceNotFoundException.of("Show", showId));
         List<ShowSeat> seats = showSeats.findSeatMap(showId);
         Map<String, List<ShowSeat>> rows = seats.stream()
                 .collect(Collectors.groupingBy(ss -> ss.getSeat().getRowLabel(), TreeMap::new, Collectors.toList()));

@@ -13,7 +13,7 @@ import java.time.Instant;
 @Setter
 @NoArgsConstructor
 @Table(name = "payments")
-public class Payment {
+public class Payment implements OwnedByUser {
 
     public enum Status { PENDING, SUCCEEDED, FAILED, REFUNDED }
 

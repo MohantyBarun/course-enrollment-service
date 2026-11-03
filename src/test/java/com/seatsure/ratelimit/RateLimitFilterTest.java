@@ -43,15 +43,15 @@ class RateLimitFilterTest {
         send("POST", "/auth/login", "1.1.1.1");
         send("POST", "/auth/login", "1.1.1.1");
 
-        assertThat(send("GET", "/courses", "1.1.1.1").getHeader("X-RateLimit-Remaining")).isEqualTo("4");
+        assertThat(send("GET", "/cities", "1.1.1.1").getHeader("X-RateLimit-Remaining")).isEqualTo("4");
     }
 
     @Test
     void generalApi_hasItsOwnLimit() throws Exception {
         for (int i = 0; i < 5; i++) {
-            assertThat(send("GET", "/courses", "3.3.3.3").getStatus()).isEqualTo(200);
+            assertThat(send("GET", "/cities", "3.3.3.3").getStatus()).isEqualTo(200);
         }
-        assertThat(send("GET", "/students", "3.3.3.3").getStatus()).isEqualTo(429);
+        assertThat(send("GET", "/movies", "3.3.3.3").getStatus()).isEqualTo(429);
     }
 
     @Test

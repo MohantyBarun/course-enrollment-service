@@ -36,7 +36,6 @@ import java.util.List;
 @Service
 public class BookingService {
 
-    private static final char[] REFERENCE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ".toCharArray();
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ShowSeatRepository showSeats;
@@ -105,7 +104,7 @@ public class BookingService {
         Instant now = clock.instant();
         // Lock first, so a double click (or a show cancellation at the same moment) can't release seats twice
         Booking locked = bookings.findByReferenceForUpdate(reference).orElseThrow(() -> notFound(reference));
-        if (!locked.getUser().getId().equals(userId)) {
+        if (!locked.isOwnedBy(userId)) {
             throw notFound(reference); // don't reveal that someone else's booking exists
         }
         if (locked.getStatus() == BookingStatus.CANCELLED) {
@@ -138,7 +137,7 @@ public class BookingService {
     @Transactional(readOnly = true)
     public BookingView get(Long userId, boolean admin, String reference) {
         Booking booking = bookings.findDetailed(reference).orElseThrow(() -> notFound(reference));
-        if (!admin && !booking.getUser().getId().equals(userId)) {
+        if (!admin && !booking.isOwnedBy(userId)) {
             throw notFound(reference);
         }
         return BookingView.of(booking, !admin && isCancellable(booking, clock.instant()));
@@ -168,21 +167,17 @@ public class BookingService {
                         booking.getShow().getStartsAt(), booking.totalPaise(), reason));
     }
 
-    /** "SS" + 8 characters without look-alikes (0/O, 1/I/L, U): about 6.5e11 combinations. */
     private String newReference() {
         for (int attempt = 0; attempt < 5; attempt++) {
-            StringBuilder ref = new StringBuilder("SS");
-            for (int i = 0; i < 8; i++) {
-                ref.append(REFERENCE_ALPHABET[RANDOM.nextInt(REFERENCE_ALPHABET.length)]);
-            }
-            if (!bookings.existsByReference(ref.toString())) {
-                return ref.toString(); // the unique constraint still guards the tiny race
+            String ref = BookingReferences.next(RANDOM);
+            if (!bookings.existsByReference(ref)) {
+                return ref; // the unique constraint still guards the tiny race
             }
         }
         throw new IllegalStateException("Could not generate a unique booking reference");
     }
 
     private static ResourceNotFoundException notFound(String reference) {
-        return new ResourceNotFoundException("Booking not found: " + reference);
+        return ResourceNotFoundException.of("Booking", reference);
     }
 }

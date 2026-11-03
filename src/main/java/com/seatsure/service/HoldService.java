@@ -86,8 +86,8 @@ public class HoldService {
             throw new BadRequestException("The same seat was selected twice");
         }
         // Shared lock first, so the status read below can't be overtaken by a show cancellation
-        shows.lockForShare(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
-        Show show = shows.findDetailed(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        shows.lockForShare(showId).orElseThrow(() -> ResourceNotFoundException.of("Show", showId));
+        Show show = shows.findDetailed(showId).orElseThrow(() -> ResourceNotFoundException.of("Show", showId));
         if (!show.isBookable(now)) {
             throw new BadRequestException(show.getStatus() == ShowStatus.CANCELLED
                     ? "This show has been cancelled" : "Bookings for this show have closed");
@@ -139,7 +139,7 @@ public class HoldService {
     public void release(Long userId, Long holdId) {
         Instant now = clock.instant();
         SeatHold hold = holds.findByIdForUpdate(holdId)
-                .filter(h -> h.getUser().getId().equals(userId))
+                .filter(h -> h.isOwnedBy(userId))
                 .orElseThrow(() -> new ResourceNotFoundException("Hold not found"));
         if (hold.getStatus() != SeatHold.Status.ACTIVE) {
             throw new ConflictException("This hold has already ended");
@@ -153,7 +153,7 @@ public class HoldService {
     @Transactional(readOnly = true)
     public HoldView get(Long userId, Long holdId) {
         SeatHold hold = holds.findDetailed(holdId)
-                .filter(h -> h.getUser().getId().equals(userId))
+                .filter(h -> h.isOwnedBy(userId))
                 .orElseThrow(() -> new ResourceNotFoundException("Hold not found"));
         Payment latest = payments.findByHoldIdOrderByCreatedAtDesc(holdId).stream().findFirst().orElse(null);
         if (hold.getStatus() == SeatHold.Status.CONVERTED && hold.getBooking() != null) {

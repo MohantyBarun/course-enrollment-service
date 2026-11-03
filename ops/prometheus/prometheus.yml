@@ -3,7 +3,7 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: student-service
+  - job_name: seatsure
     metrics_path: /actuator/prometheus
     basic_auth:
       username: metrics
