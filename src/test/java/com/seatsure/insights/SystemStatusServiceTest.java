@@ -1,5 +1,7 @@
 package com.seatsure.insights;
 
+import com.seatsure.ratelimit.RateLimitProperties;
+import java.time.Clock;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.notification.EmailSender;
@@ -37,7 +39,7 @@ class SystemStatusServiceTest {
         caches.initializeCaches();
         when(emailSender.mode()).thenReturn("Logged only (demo mode)");
         service = new SystemStatusService(meters, new TransactionAwareCacheManagerProxy(caches), outbox, breakers,
-                emailSender, false, false, true, "", 10, 5, 20, 30, 300);
+                emailSender, false, false, true, "", new RateLimitProperties(true, 10, 5, 20, 30, 300), Clock.systemUTC());
     }
 
     private void request(String uri, String outcome, long millis) {
