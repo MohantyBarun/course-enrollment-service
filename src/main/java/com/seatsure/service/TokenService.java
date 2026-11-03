@@ -1,5 +1,6 @@
 package com.seatsure.service;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.time.Clock;
 import com.seatsure.dto.AuthDtos.TokenResponse;
 import com.seatsure.dto.AuthDtos.UserView;
@@ -99,6 +100,7 @@ public class TokenService {
 
     @Transactional
     @Scheduled(cron = "0 40 3 * * *", zone = "Asia/Kolkata")
+    @SchedulerLock(name = "purge-refresh-tokens", lockAtLeastFor = "PT1M")
     public void purgeExpired() {
         int deleted = refreshTokens.deleteExpiredBefore(clock.instant().minus(Duration.ofDays(1)));
         log.info("Purged {} expired refresh tokens", deleted);

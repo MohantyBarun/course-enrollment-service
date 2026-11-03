@@ -1,5 +1,6 @@
 package com.seatsure.idempotency;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.time.Clock;
 import com.seatsure.entity.IdempotencyRecord;
 import com.seatsure.repository.IdempotencyRecordRepository;
@@ -111,6 +112,7 @@ public class IdempotencyService {
     }
 
     @Scheduled(cron = "0 25 3 * * *", zone = "Asia/Kolkata")
+    @SchedulerLock(name = "purge-idempotency-keys", lockAtLeastFor = "PT1M")
     public void purgeExpired() {
         Integer deleted = tx.execute(s -> repository.deleteExpired(clock.instant()));
         log.info("Purged {} expired idempotency keys", deleted);

@@ -1,5 +1,6 @@
 package com.seatsure.outbox;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.time.Clock;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.repository.OutboxEventRepository;
@@ -142,6 +143,7 @@ public class OutboxRelay {
     }
 
     @Scheduled(cron = "0 15 3 * * *", zone = "Asia/Kolkata")
+    @SchedulerLock(name = "purge-outbox", lockAtLeastFor = "PT1M")
     public void purgePublished() {
         Integer deleted = transactionTemplate.execute(status -> outboxRepository.deleteByStatusAndPublishedAtBefore(
                 OutboxEvent.Status.PUBLISHED, clock.instant().minus(retention)));
