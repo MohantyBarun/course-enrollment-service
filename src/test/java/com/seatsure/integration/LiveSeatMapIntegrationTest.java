@@ -2,7 +2,7 @@ package com.seatsure.integration;
 
 import com.seatsure.exception.SeatsUnavailableException;
 import com.seatsure.realtime.SeatChangeListener;
-import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.ShowScheduleService;
 import com.seatsure.service.HoldService;
 import com.seatsure.support.FullAppIntegrationTest;
 import com.seatsure.support.TestFixtures;
@@ -40,7 +40,7 @@ class LiveSeatMapIntegrationTest {
 
     @LocalServerPort private int port;
     @Autowired private HoldService holds;
-    @Autowired private AdminCatalogService admin;
+    @Autowired private ShowScheduleService showSchedule;
     @Autowired private TestFixtures fixtures;
     @Autowired private SeatChangeListener listener;
     @Autowired private JdbcTemplate jdbc;
@@ -99,7 +99,7 @@ class LiveSeatMapIntegrationTest {
         ShowFixture show = fixtures.show(1, 4);
         BlockingQueue<String> stream = open(show.showId());
 
-        admin.cancelShow(show.showId(), "Projector failure");
+        showSchedule.cancelShow(show.showId(), "Projector failure");
 
         assertThat(stream.poll(10, TimeUnit.SECONDS)).isEqualTo("event:reload");
     }

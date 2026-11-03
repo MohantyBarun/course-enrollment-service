@@ -4,8 +4,8 @@ import com.seatsure.config.CacheConfig;
 import com.seatsure.dto.AdminDtos.RowSpec;
 import com.seatsure.entity.*;
 import com.seatsure.repository.*;
-import com.seatsure.service.AdminCatalogService;
 import com.seatsure.service.BookingReferences;
+import com.seatsure.service.VenueAdminService;
 import com.seatsure.service.Roles;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -247,7 +247,7 @@ public class DemoDataService {
 
     private ScreenPlan screen(Cinema cinema, String name, List<RowSpec> layout, CinemaSeed seed, boolean large) {
         Screen screen = screens.save(new Screen(cinema, name));
-        List<Seat> created = seats.saveAll(AdminCatalogService.layoutSeats(screen, layout));
+        List<Seat> created = seats.saveAll(VenueAdminService.layoutSeats(screen, layout));
         Map<String, List<SeatInfo>> byRow = new LinkedHashMap<>();
         for (Seat s : created) {
             byRow.computeIfAbsent(s.getRowLabel(), r -> new ArrayList<>())

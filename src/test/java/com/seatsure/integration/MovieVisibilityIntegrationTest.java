@@ -5,7 +5,7 @@ import com.seatsure.entity.Certificate;
 import com.seatsure.entity.User;
 import com.seatsure.repository.CityRepository;
 import com.seatsure.repository.UserRepository;
-import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.MovieAdminService;
 import com.seatsure.support.FullAppIntegrationTest;
 import com.seatsure.support.TestFixtures;
 import com.seatsure.util.JwtUtil;
@@ -31,7 +31,7 @@ class MovieVisibilityIntegrationTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private TestFixtures fixtures;
-    @Autowired private AdminCatalogService admin;
+    @Autowired private MovieAdminService movieAdmin;
     @Autowired private CityRepository cities;
     @Autowired private UserRepository users;
     @Autowired private JwtUtil jwtUtil;
@@ -84,7 +84,7 @@ class MovieVisibilityIntegrationTest {
     }
 
     private Long movie(LocalDate releaseDate) {
-        return admin.createMovie(new MovieRequest(TestFixtures.unique("Movie"), "A test movie.", 120, "Hindi",
+        return movieAdmin.createMovie(new MovieRequest(TestFixtures.unique("Movie"), "A test movie.", 120, "Hindi",
                 Certificate.UA, List.of("Drama"), releaseDate, null)).id();
     }
 

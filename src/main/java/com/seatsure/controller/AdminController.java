@@ -5,7 +5,9 @@ import com.seatsure.dto.AdminDtos.*;
 import com.seatsure.dto.CatalogDtos.CityView;
 import com.seatsure.dto.CatalogDtos.MovieDetail;
 import com.seatsure.dto.PagedResponseDTO;
-import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.MovieAdminService;
+import com.seatsure.service.ShowScheduleService;
+import com.seatsure.service.VenueAdminService;
 import com.seatsure.service.CatalogService;
 import com.seatsure.service.DashboardService;
 import com.seatsure.util.CurrentUser;
@@ -32,7 +34,9 @@ import java.util.List;
 @Tag(name = "Admin", description = "Movies, cinemas, screens, shows and sales (admin only)")
 public class AdminController {
 
-    private final AdminCatalogService catalog;
+    private final MovieAdminService movieAdmin;
+    private final VenueAdminService venueAdmin;
+    private final ShowScheduleService showSchedule;
     private final CatalogService catalogService;
     private final DashboardService dashboard;
     private final DemoPrivacy demoPrivacy;
@@ -56,19 +60,19 @@ public class AdminController {
     @Operation(summary = "Every movie, newest release first, with where customers can see it")
     @GetMapping("/movies")
     public List<AdminMovie> movies() {
-        return catalog.movies();
+        return movieAdmin.movies();
     }
 
     @PostMapping("/movies")
     @ResponseStatus(HttpStatus.CREATED)
     public MovieDetail createMovie(@Valid @RequestBody MovieRequest request) {
-        return catalog.createMovie(request);
+        return movieAdmin.createMovie(request);
     }
 
     @Operation(summary = "Update a movie", description = "The running time can't change, since shows are scheduled around it.")
     @PutMapping("/movies/{id}")
     public MovieDetail updateMovie(@PathVariable Long id, @Valid @RequestBody MovieRequest request) {
-        return catalog.updateMovie(id, request);
+        return movieAdmin.updateMovie(id, request);
     }
 
     @Operation(summary = "Every city, including those without cinemas yet")
@@ -79,13 +83,13 @@ public class AdminController {
 
     @GetMapping("/cinemas")
     public List<CinemaView> cinemas() {
-        return catalog.cinemas();
+        return venueAdmin.cinemas();
     }
 
     @PostMapping("/cinemas")
     @ResponseStatus(HttpStatus.CREATED)
     public CinemaView createCinema(@Valid @RequestBody CinemaRequest request) {
-        return catalog.createCinema(request);
+        return venueAdmin.createCinema(request);
     }
 
     @Operation(summary = "Add a screen with its seat layout",
@@ -93,14 +97,14 @@ public class AdminController {
     @PostMapping("/cinemas/{cinemaId}/screens")
     @ResponseStatus(HttpStatus.CREATED)
     public ScreenView createScreen(@PathVariable Long cinemaId, @Valid @RequestBody ScreenRequest request) {
-        return catalog.createScreen(cinemaId, request);
+        return venueAdmin.createScreen(cinemaId, request);
     }
 
     @Operation(summary = "Shows at a cinema on a day, with seats booked")
     @GetMapping("/cinemas/{cinemaId}/shows")
     public List<AdminShowView> shows(@PathVariable Long cinemaId,
                                      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return catalog.showsAt(cinemaId, date);
+        return showSchedule.showsAt(cinemaId, date);
     }
 
     @Operation(summary = "Schedule a show",
@@ -108,12 +112,12 @@ public class AdminController {
     @PostMapping("/shows")
     @ResponseStatus(HttpStatus.CREATED)
     public AdminShowView createShow(@Valid @RequestBody ShowRequest request) {
-        return catalog.createShow(request);
+        return showSchedule.createShow(request);
     }
 
     @Operation(summary = "Cancel a show", description = "Cancels every booking for it; each customer is emailed.")
     @PostMapping("/shows/{showId}/cancel")
     public ShowCancelled cancelShow(@PathVariable Long showId, @Valid @RequestBody CancelShowRequest request) {
-        return catalog.cancelShow(showId, request.reason());
+        return showSchedule.cancelShow(showId, request.reason());
     }
 }

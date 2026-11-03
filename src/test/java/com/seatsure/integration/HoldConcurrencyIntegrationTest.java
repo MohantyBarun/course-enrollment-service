@@ -1,7 +1,7 @@
 package com.seatsure.integration;
 
 import com.seatsure.exception.SeatsUnavailableException;
-import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.ShowScheduleService;
 import com.seatsure.service.BookingService;
 import com.seatsure.service.HoldService;
 import com.seatsure.support.FullAppIntegrationTest;
@@ -30,7 +30,7 @@ class HoldConcurrencyIntegrationTest {
 
     @Autowired private HoldService holds;
     @Autowired private BookingService bookings;
-    @Autowired private AdminCatalogService admin;
+    @Autowired private ShowScheduleService showSchedule;
     @Autowired private TestFixtures fixtures;
     @Autowired private JdbcTemplate jdbc;
 
@@ -154,7 +154,7 @@ class HoldConcurrencyIntegrationTest {
             }
             futures.add(pool.submit(() -> {
                 start.await();
-                admin.cancelShow(show.showId(), "Projector failure");
+                showSchedule.cancelShow(show.showId(), "Projector failure");
                 return null;
             }));
             start.countDown();

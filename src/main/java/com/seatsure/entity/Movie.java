@@ -57,7 +57,20 @@ public class Movie {
         return Arrays.stream(genres.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
     }
 
-    public void setGenreList(List<String> list) {
-        this.genres = String.join(",", list.stream().map(String::trim).filter(s -> !s.isEmpty()).distinct().toList());
+    /** Everything an admin can edit, normalised (trimmed; a blank poster URL means a generated poster). */
+    public void update(String title, String synopsis, int durationMinutes, String language, Certificate certificate,
+                       List<String> genres, LocalDate releaseDate, String posterUrl) {
+        this.title = title.trim();
+        this.synopsis = synopsis.trim();
+        this.durationMinutes = durationMinutes;
+        this.language = language.trim();
+        this.certificate = certificate;
+        this.genres = String.join(",", genres.stream().map(String::trim).filter(g -> !g.isEmpty()).distinct().toList());
+        this.releaseDate = releaseDate;
+        this.posterUrl = posterUrl == null || posterUrl.isBlank() ? null : posterUrl.trim();
+    }
+
+    public void touch(Instant now) {
+        this.updatedAt = now;
     }
 }
