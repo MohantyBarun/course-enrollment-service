@@ -45,8 +45,9 @@ public class AdminController {
         return dashboard.recentBookings(page, size);
     }
 
+    @Operation(summary = "Every movie, newest release first, with where customers can see it")
     @GetMapping("/movies")
-    public List<MovieDetail> movies() {
+    public List<AdminMovie> movies() {
         return catalog.movies();
     }
 

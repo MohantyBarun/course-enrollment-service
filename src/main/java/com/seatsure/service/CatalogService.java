@@ -81,8 +81,15 @@ public class CatalogService {
                 .toList();
     }
 
-    public List<MovieCard> comingSoon() {
-        return movies.findByReleaseDateAfterOrderByReleaseDateAsc(LocalDate.now(clock.withZone(zone))).stream()
+    /**
+     * Releasing today or later, minus what is already showing in the city (an advance booking lists
+     * the movie under "now showing" there). Releasing today counts: a movie whose shows aren't
+     * scheduled yet would otherwise be in neither list on its release day.
+     */
+    public List<MovieCard> comingSoon(List<MovieCard> nowShowing) {
+        Set<Long> showing = nowShowing.stream().map(MovieCard::id).collect(Collectors.toSet());
+        return movies.findByReleaseDateGreaterThanEqualOrderByReleaseDateAsc(LocalDate.now(clock.withZone(zone))).stream()
+                .filter(m -> !showing.contains(m.getId()))
                 .map(MovieCard::of).toList();
     }
 

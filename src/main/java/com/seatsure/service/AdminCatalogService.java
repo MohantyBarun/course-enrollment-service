@@ -50,8 +50,21 @@ public class AdminCatalogService {
     // ---------------------------------------------------------------- movies
 
     @Transactional(readOnly = true)
-    public List<MovieDetail> movies() {
-        return movies.findAllByOrderByReleaseDateDesc().stream().map(MovieDetail::of).toList();
+    public List<AdminMovie> movies() {
+        Map<Long, List<ShowRepository.UpcomingShowCount>> upcoming = shows.countUpcomingByMovieAndCity(clock.instant())
+                .stream().collect(Collectors.groupingBy(ShowRepository.UpcomingShowCount::getMovieId));
+        LocalDate today = LocalDate.now(clock.withZone(zone));
+        return movies.findAllByOrderByReleaseDateDesc().stream().map(m -> {
+            List<ShowRepository.UpcomingShowCount> counts = upcoming.getOrDefault(m.getId(), List.of());
+            long showCount = counts.stream().mapToLong(ShowRepository.UpcomingShowCount::getShows).sum();
+            List<String> cityNames = counts.stream().map(ShowRepository.UpcomingShowCount::getCity).sorted().toList();
+            CustomerVisibility visibility = showCount > 0 ? CustomerVisibility.NOW_SHOWING
+                    : !m.getReleaseDate().isBefore(today) ? CustomerVisibility.COMING_SOON
+                    : CustomerVisibility.HIDDEN;
+            return new AdminMovie(m.getId(), m.getTitle(), m.getSynopsis(), m.getLanguage(), m.getCertificate(),
+                    m.genreList(), m.getDurationMinutes(), m.getReleaseDate(), m.getPosterUrl(),
+                    visibility, showCount, cityNames);
+        }).toList();
     }
 
     @Transactional

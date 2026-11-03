@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { adminApi } from '../../api/endpoints';
-import type { Certificate, MovieDetail, MovieRequest } from '../../api/types';
+import type { AdminMovie, Certificate, MovieDetail, MovieRequest } from '../../api/types';
 import { Poster } from '../../components/Poster';
-import { Alert, EmptyState, Field, LoadingBlock, Modal, PageHeader, Spinner } from '../../components/ui';
+import { Alert, Badge, EmptyState, Field, LoadingBlock, Modal, PageHeader, Spinner } from '../../components/ui';
 import { useApi } from '../../hooks/useApi';
 import { explainApiError } from '../../lib/backendErrors';
 import { formatDate, formatRuntime, todayIst } from '../../lib/format';
@@ -84,6 +85,22 @@ function MovieForm({ movie, onClose, onSaved }: { movie: MovieDetail | null; onC
   );
 }
 
+/** What customers see of a movie, mirroring the home page rules: shows -> now showing, unreleased -> coming soon. */
+export function VisibilityBadge({ movie }: { movie: AdminMovie }) {
+  if (movie.visibility === 'NOW_SHOWING') {
+    const cities = movie.showingIn.join(', ');
+    return (
+      <Badge tone="mint" title={`${movie.upcomingShows} upcoming show${movie.upcomingShows === 1 ? '' : 's'} in ${cities}`}>
+        Now showing · {movie.showingIn.length === 1 ? cities : `${movie.showingIn.length} cities`}
+      </Badge>
+    );
+  }
+  if (movie.visibility === 'COMING_SOON') {
+    return <Badge tone="grape" title="Listed under Coming soon in every city until shows are scheduled">Coming soon</Badge>;
+  }
+  return <Badge tone="flame" title="Released, with no upcoming shows: customers can't find it">Hidden from customers</Badge>;
+}
+
 export function AdminMoviesPage() {
   const movies = useApi(adminApi.movies);
   const [editing, setEditing] = useState<MovieDetail | 'new' | null>(null);
@@ -91,7 +108,7 @@ export function AdminMoviesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Movies" subtitle="Everything in the catalogue, newest release first."
+      <PageHeader title="Movies" subtitle="Everything in the catalogue, newest release first. Customers see a released movie only once it has shows."
                   action={<button type="button" className="btn-primary" onClick={() => setEditing('new')}>+ Add movie</button>} />
       {error && <Alert>{error}</Alert>}
       {!movies.data ? (!error && <LoadingBlock />) : movies.data.length === 0 ? (
@@ -106,6 +123,12 @@ export function AdminMoviesPage() {
                 <p className="mt-2 truncate text-sm font-bold text-white">{m.title}</p>
                 <p className="truncate text-xs text-ink-400">{m.language} · {formatRuntime(m.durationMinutes)} · {formatDate(m.releaseDate)}</p>
               </button>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <VisibilityBadge movie={m} />
+                {m.visibility !== 'NOW_SHOWING' && (
+                  <Link to={`/admin/shows?movie=${m.id}`} className="text-xs font-semibold text-sun-300 hover:underline">Schedule a show</Link>
+                )}
+              </div>
             </li>
           ))}
         </ul>

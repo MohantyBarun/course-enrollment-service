@@ -50,6 +50,15 @@ export interface MovieDetail extends MovieCard {
   synopsis: string;
 }
 
+/** Where customers can find a movie (see the backend's AdminDtos.CustomerVisibility). */
+export type CustomerVisibility = 'NOW_SHOWING' | 'COMING_SOON' | 'HIDDEN';
+
+export interface AdminMovie extends MovieDetail {
+  visibility: CustomerVisibility;
+  upcomingShows: number;
+  showingIn: string[];
+}
+
 export interface Home {
   city: City;
   nowShowing: MovieCard[];

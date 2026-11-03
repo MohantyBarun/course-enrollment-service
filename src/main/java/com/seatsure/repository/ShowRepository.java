@@ -59,6 +59,23 @@ public interface ShowRepository extends JpaRepository<Show, Long> {
             """)
     List<Show> findScheduledBetween(@Param("from") Instant from, @Param("to") Instant to);
 
+    /** Upcoming scheduled shows per movie and city, for the admin's "who can see this movie" view. */
+    @Query("""
+            SELECT s.movie.id AS movieId, c.city.name AS city, COUNT(s) AS shows
+            FROM Show s JOIN s.screen sc JOIN sc.cinema c
+            WHERE s.status = com.seatsure.entity.ShowStatus.SCHEDULED AND s.startsAt > :now
+            GROUP BY s.movie.id, c.city.name
+            """)
+    List<UpcomingShowCount> countUpcomingByMovieAndCity(@Param("now") Instant now);
+
+    interface UpcomingShowCount {
+        Long getMovieId();
+
+        String getCity();
+
+        long getShows();
+    }
+
     /** Which upcoming days have shows of a movie in a city (for the date strip). */
     @Query("""
             SELECT s.startsAt FROM Show s JOIN s.screen sc JOIN sc.cinema c
