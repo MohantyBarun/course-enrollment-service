@@ -1,9 +1,5 @@
 package com.seatsure.service;
 
-import java.util.Locale;
-import java.time.format.DateTimeFormatter;
-import java.time.ZoneId;
-import java.time.Clock;
 import com.seatsure.dto.AuthDtos.ChangePasswordRequest;
 import com.seatsure.dto.AuthDtos.LoginRequest;
 import com.seatsure.dto.AuthDtos.RegisterRequest;
@@ -27,44 +23,30 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
-import java.time.Instant;
 
 @Slf4j
 @Service
 public class AuthService {
 
-    /**
-     * Lockout never becomes permanent: anyone who knows an email address could otherwise lock its
-     * owner out for good. Blocks escalate instead (30 min, 1 h, 2 h, ... up to a day), and failures
-     * older than a day are forgotten. Per-IP rate limits slow guessing further.
-     */
-    static final int BLOCK_THRESHOLD = 5;
-    static final Duration FIRST_BLOCK = Duration.ofMinutes(30);
-    static final Duration MAX_BLOCK = Duration.ofHours(24);
-    static final Duration FAILURE_MEMORY = Duration.ofHours(24);
-    private static final DateTimeFormatter UNTIL = DateTimeFormatter.ofPattern("d MMM, h:mm a z", Locale.ENGLISH);
     static final String INVALID_CREDENTIALS = "Invalid email or password";
 
     private final UserRepository users;
     private final LoginSecurityRepository loginSecurity;
+    private final LoginThrottle throttle;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokens;
     private final OutboxService outbox;
-    private final Clock clock;
-    private final ZoneId zone;
     /** Compared against when the email is unknown, so both cases take a BCrypt check (no timing oracle). */
     private final String dummyHash;
 
-    public AuthService(UserRepository users, LoginSecurityRepository loginSecurity, PasswordEncoder passwordEncoder,
-                       TokenService tokens, OutboxService outbox, Clock clock, ZoneId zone) {
+    public AuthService(UserRepository users, LoginSecurityRepository loginSecurity, LoginThrottle throttle,
+                       PasswordEncoder passwordEncoder, TokenService tokens, OutboxService outbox) {
         this.users = users;
         this.loginSecurity = loginSecurity;
+        this.throttle = throttle;
         this.passwordEncoder = passwordEncoder;
         this.tokens = tokens;
         this.outbox = outbox;
-        this.clock = clock;
-        this.zone = zone;
         this.dummyHash = passwordEncoder.encode("not-a-real-password");
     }
 
@@ -92,8 +74,11 @@ public class AuthService {
 
     /**
      * noRollbackFor: a failed login records the failure (counters, block status) and then throws;
-     * rolling that back would disable the brute-force protection. The counter row is locked, so
-     * parallel guesses are counted one after another instead of overwriting each other.
+     * rolling that back would disable the brute-force protection.
+     *
+     * <p>A blocked or deactivated account gets its own message, so these answers do reveal that an
+     * email is registered; so does sign-up ("already exists"), which can't avoid it. Rate limits
+     * make probing either one slow.
      */
     @Observed(name = "auth.login", contextualName = "login")
     @Transactional(noRollbackFor = {AuthenticationFailedException.class, AccountLockedException.class})
@@ -103,60 +88,16 @@ public class AuthService {
             passwordEncoder.matches(request.password(), dummyHash);
             throw new AuthenticationFailedException(INVALID_CREDENTIALS);
         }
-        LoginSecurity security = loginSecurity.findByIdForUpdate(user.getId())
-                .orElseGet(() -> loginSecurity.save(new LoginSecurity(user)));
-        Instant now = clock.instant();
-
-        // Set only by hand (support), never by failed logins
-        if (Boolean.TRUE.equals(security.getPermanentBlock())) {
-            throw new AccountLockedException("This account is blocked. Please contact support.");
-        }
-        if (security.getAccountStatus() == AccountStatus.BLOCKED) {
-            if (now.isBefore(security.getBlockExpiryAt())) {
-                throw new AccountLockedException("Too many failed attempts. Try again after "
-                        + UNTIL.format(security.getBlockExpiryAt().atZone(zone)) + ".");
-            }
-            // The block has expired. The count is kept, so the next wrong password blocks for longer.
-            security.setAccountStatus(AccountStatus.ACTIVE);
-            security.setUnblockedAt(now);
-        } else if (security.getLastFailedAt() != null && security.getLastFailedAt().isBefore(now.minus(FAILURE_MEMORY))) {
-            security.setWrongPasswordCount(0); // an old typo shouldn't count towards a block today
-        }
+        LoginSecurity security = throttle.admit(user);
         if (!user.isActive()) {
             throw new AccountLockedException("This account is deactivated. Please contact support.");
         }
-
         if (!passwordEncoder.matches(request.password(), user.getPassword())) {
-            int failures = security.getWrongPasswordCount() + 1;
-            security.setWrongPasswordCount(failures);
-            security.setLastFailedAt(now);
-            if (failures >= BLOCK_THRESHOLD) {
-                Duration block = blockDuration(failures);
-                security.setAccountStatus(AccountStatus.BLOCKED);
-                security.setBlockedAt(now);
-                security.setBlockExpiryAt(now.plus(block));
-                security.setBlockReason(failures + " wrong passwords");
-                log.warn("Account {} blocked for {} after {} wrong passwords", user.getId(), block, failures);
-                throw new AccountLockedException("Too many failed attempts. Try again in " + describe(block) + ".");
-            }
+            throttle.failed(security); // throws if this attempt blocks the account
             throw new AuthenticationFailedException(INVALID_CREDENTIALS);
         }
-
-        security.setWrongPasswordCount(0);
-        security.setLastLoginAt(now);
+        throttle.succeeded(security);
         return tokens.issue(user);
-    }
-
-    /** 30 min at the 5th wrong password, doubling with each one after, capped at a day. */
-    static Duration blockDuration(int failures) {
-        int doublings = Math.min(failures - BLOCK_THRESHOLD, 10); // 2^10 x 30 min is already past the cap
-        Duration block = FIRST_BLOCK.multipliedBy(1L << doublings);
-        return block.compareTo(MAX_BLOCK) > 0 ? MAX_BLOCK : block;
-    }
-
-    private static String describe(Duration block) {
-        long hours = block.toHours();
-        return hours >= 1 ? hours + (hours == 1 ? " hour" : " hours") : block.toMinutes() + " minutes";
     }
 
     @Transactional
