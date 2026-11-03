@@ -1,386 +1,236 @@
-# 🎓 Student Management System
+# 🎬 SeatSure
 
-[![CI](https://github.com/MohantyBarun/course-enrollment-service/actions/workflows/ci.yml/badge.svg)](https://github.com/MohantyBarun/course-enrollment-service/actions/workflows/ci.yml)
+[![CI](https://github.com/MohantyBarun/seatsure/actions/workflows/ci.yml/badge.svg)](https://github.com/MohantyBarun/seatsure/actions/workflows/ci.yml)
 
-A full-stack Student Management System: a **Spring Boot** REST API and a **React + TypeScript** frontend, deployed on free-tier cloud services.
+A movie ticket booking platform: a **Spring Boot** API and a **React + TypeScript** frontend, deployed on free-tier cloud services.
 
 | | Live |
 |---|---|
-| 🖥️ **App** | **[student-management-system-three-jet.vercel.app](https://student-management-system-three-jet.vercel.app)** |
+| 🍿 **App** | **[seatsure-tickets.vercel.app](https://seatsure-tickets.vercel.app)** |
 | 📖 **API docs** | [Swagger UI](https://student-service-w3vr.onrender.com/swagger-ui.html) |
 
 > Hosted on free tiers: the backend sleeps when idle, so the first request can take up to a minute.
 
-A college **academic portal**:
-- **Admins (academic office):** manage students and courses, take attendance, enter grades and post notices.
-- **Students:** browse the course catalog, enroll and drop within credit and capacity limits, track attendance against the 75% rule, and see grades with SGPA/CGPA on the 10-point scale.
+**👉 Try it without an account:** the sign-in page has **Demo customer** and **Demo admin** buttons. The demo has 8 cinemas in 4 cities, 10 movies and four days of shows, and it resets every night.
 
-**👉 Try it without an account:** the login page has **Try as Admin** and **Try as Student** buttons backed by realistic demo data.
+## 🎯 The problem
 
-**👀 See the backend at work:** as admin, open two pages:
-- **Emails:** every notification moving through the transactional outbox (queued, retrying, sent or logged only), with the reason shown and the temporary password masked. Register a student and the welcome email shows up within a second. A **Send test email** button checks the SMTP setup end to end. It only sends to allowlisted addresses, at most once every 5 minutes.
-- **System:** live numbers from the metrics registry: traffic and latency, cache hit rates, outbox backlog, rate-limit rejections, circuit-breaker states and JVM heap. A button sends wrong logins until the per-IP limit answers **429**.
+Selling cinema seats is a small but hard concurrency problem:
 
-## 🛠️ Tech Stack
-**Backend**
-- Java 21
-- Spring Boot 3.4.4 (Web, Data JPA, Security, Validation)
-- PostgreSQL
-- JWT (jjwt 0.12)
-- Lombok
-- Maven
-- Flyway (schema migrations)
-- Redis (cache, distributed rate limiting) with a Caffeine / in-memory fallback
-- RabbitMQ (Spring AMQP) with a transactional outbox, retries and a dead-letter queue
-- Resilience4j (circuit breakers), Spring Mail
-- Micrometer: Prometheus metrics, OpenTelemetry tracing, structured (ECS) logs
-- OpenAPI 3 / Swagger UI (springdoc)
-- JUnit 5, Mockito, MockMvc, Testcontainers (PostgreSQL, RabbitMQ, Redis), Awaitility, JaCoCo
+- **Thousands of people want the same few seats at the same moment** (a blockbuster's first-day evening show). Each seat must go to exactly one person, without double-booking it and without deadlocking the database.
+- **Paying takes minutes, and payments arrive late.** A seat has to be reserved while the customer pays, released if they give up, and the bank's confirmation comes back asynchronously, sometimes twice and sometimes after the reservation has lapsed.
+- **Everyone looking at the seat map should see it change live**, so nobody picks a seat that was taken a second ago.
+- **Sold out shouldn't be the end.** When a seat frees up (an unpaid hold, a cancellation), the next person in line should get it, not whoever refreshes fastest.
+- **Emails must match what actually happened.** No ticket email for a rolled-back booking, and no lost email because the mail server was down.
 
-**Frontend** ([`frontend/`](frontend))
-- React 18, TypeScript (strict), Vite
-- React Router, Tailwind CSS
-- Vitest, Testing Library
+SeatSure solves each of these, and every guarantee is tested against real PostgreSQL.
 
-**Infrastructure**
-- Docker, Docker Compose (local stack), GitHub Actions, Render (backend), Neon (PostgreSQL), Vercel (frontend)
+## 🧭 How a booking works
 
-## 🏗️ Backend architecture
+1. **Browse:** pick a city, a movie, a date and a showtime. This is public, cached, and needs no account.
+2. **Pick seats** on a seat map that updates live over Server-Sent Events.
+3. **Hold:** the chosen seats are locked and marked held for **10 minutes**. It's all or nothing: if any seat was taken first, nothing is held and the response lists the taken seats.
+4. **Pay** on the mock gateway's page ("SeatSure Test Pay": approve or decline).
+5. **Webhook:** the gateway sends a signed webhook, retried until acknowledged. The hold becomes a booking, the seats become booked, and a ticket email goes out.
+6. **Afterwards:** the customer can cancel up to 2 hours before the show for a refund. Freed seats go to the waitlist first.
+
+Sold-out shows offer a **waitlist**: freed seats are held straight away for the first customer in line whose request fits, and emailed to them with 10 minutes to pay.
+
+## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
-    C[Client] -->|HTTPS| F["Filters: request id → CORS → rate limit → JWT → idempotency"]
-    F --> S[Controllers / services]
-    S -->|"one transaction"| DB[(PostgreSQL<br/>business tables + outbox_events)]
-    S <-->|cache| R[(Redis / Caffeine)]
-    F <-->|counters| R
-    DB -->|"OutboxRelay<br/>after commit + every 30s<br/>FOR UPDATE SKIP LOCKED"| T{transport}
-    T -->|"publisher confirms"| MQ[[RabbitMQ<br/>studentservice.events]]
-    T -.->|"no broker configured"| N
-    MQ --> N["NotificationDispatcher<br/>idempotent consumer"]
-    MQ -.->|"after retries"| DLQ[[notifications.email.dlq]]
-    N -->|"circuit breaker"| SMTP[SMTP]
+    B[Browser<br/>React SPA on Vercel] -->|HTTPS + JWT| F["Filters: request id → CORS → rate limit → JWT → idempotency"]
+    B <-.->|"SSE: live seat changes"| SSE[SeatStreams]
+    F --> API[Controllers / services]
+    API -->|"one transaction:<br/>row locks + business rows + outbox + pg_notify"| DB[(PostgreSQL)]
+    API <-->|cache| R[(Redis / Caffeine)]
+    F <-->|rate-limit counters| R
+    DB -->|"NOTIFY seat_changes<br/>(on commit only)"| L[SeatChangeListener<br/>dedicated LISTEN connection]
+    L --> SSE
+    API -->|start payment| GW[Mock payment gateway]
+    GW -->|"signed webhook,<br/>retried with backoff"| API
+    DB -->|"OutboxRelay<br/>FOR UPDATE SKIP LOCKED"| T{transport}
+    T -->|publisher confirms| MQ[[RabbitMQ]]
+    T -.->|no broker configured| N
+    MQ --> N[NotificationDispatcher<br/>idempotent consumer]
+    MQ -.->|after retries| DLQ[[dead-letter queue]]
+    N -->|circuit breaker| SMTP[SMTP]
 ```
 
-**Correctness under concurrency**
-- **No overbooking:** enrolling locks the student row, then the course row (`SELECT … FOR UPDATE`, always in that order, so no deadlocks). Thirty students racing for five seats get exactly five enrollments, and one student enrolling in eight courses at once never exceeds the credit limit. Both are tested against real PostgreSQL with 30 concurrent threads.
-- Constraint violations from races (e.g. a double submit) return **409**, not 500. Lock timeouts and deadlocks return 409 with "try again".
+### Correctness under concurrency
+- **No seat is held twice.** A hold locks its seats with `SELECT … FOR UPDATE` **in seat-id order**, so overlapping requests queue up instead of deadlocking. It then checks that every seat is still available and marks them held, all in one transaction. A competing request waits for the lock, then gets a **409** naming the taken seats.
+- **One lock order everywhere:** show (shared) → hold → payment → seats → waitlist entries. Cancelling a show takes the show lock exclusively, so it waits for holds in flight and blocks new ones.
+- **Expired holds** are swept every 10 seconds, each in its own transaction. Locking several holds' seats at once would take them out of id order and could deadlock with customers.
+- Choosing seats again for the same show replaces your hold: seats you keep stay yours, and the others are freed.
+- **Tested with real PostgreSQL:** 30 customers grabbing the same seat at once gives exactly one winner; overlapping multi-seat requests in random order never hold a seat twice and never deadlock; a show cancelled while customers are holding seats ends with nothing held.
 
-**Reliable async messaging (transactional outbox)**
-- Registering a student or enrolling writes a domain event to `outbox_events` **in the same transaction** as the change. A rolled-back change never sends an email, and an email is never lost because the broker or SMTP was down.
-- `OutboxRelay` delivers events right after commit (`@TransactionalEventListener` + `@Async`) and polls every 30s as a safety net. Each batch is claimed with `FOR UPDATE SKIP LOCKED`, so several instances can relay at once without double-sending. Failures back off exponentially (5s, 10s, 20s … capped at 1h), and after 10 attempts the event is marked `FAILED`. A metric tracks failed events.
-- With `RABBIT_ENABLED=true`, events go to a RabbitMQ topic exchange with **publisher confirms**. Unroutable messages count as failures. The consumer retries with exponential backoff, then **dead-letters** the message to `notifications.email.dlq`. Without a broker, the same relay hands events to the consumer in-process.
-- **Idempotent consumer:** the message id is recorded in `processed_messages` in the same transaction as the handling, so redelivered messages (at-least-once delivery) send one email.
-- Temporary passwords travel through the outbox and the queue **AES-256-GCM encrypted**, never in plain text.
+### Payments and webhooks
+- Starting a payment only registers it with the gateway. The outcome arrives later as a webhook **signed with HMAC-SHA256** (`SeatSure-Signature` header).
+- **Exactly-once processing:** the webhook's event id is recorded in the same transaction as its effect. A redelivery is acknowledged and skipped, and a failure rolls both back so the gateway retries.
+- The mock gateway retries delivery with exponential backoff (2s, 4s, 8s … capped at 5 minutes). It claims events with a short lease (`SKIP LOCKED`) and makes the HTTP call after that commits, so no row lock is held while waiting on the network.
+- **Late or wrong payments are refunded automatically.** If a payment succeeds after its hold lapsed, or for the wrong amount, it's refunded rather than confirmed, and the customer is emailed.
 
-**Idempotent APIs**
-- `POST /students`, `POST /courses`, `POST /courses/{id}/enroll` and `POST /announcements` accept an `Idempotency-Key` header (Stripe-style). A retry with the same key replays the original response (`Idempotent-Replayed: true`) instead of creating a second student or enrollment.
-  - Same key while the first request is still running: **409**.
-  - Same key with a different body: **422**.
-  - 5xx responses aren't stored, so the request can be retried.
-- Keys are scoped per user and expire after 24h. Stored responses are encrypted, because a registration response holds the temporary password.
-- The frontend sends a fresh key per action and automatically retries network failures with the same key, which matters when the free-tier server is waking up.
+### Live seat map
+- Every seat change calls `pg_notify` **inside the transaction that makes it**. PostgreSQL delivers a notification only when its transaction commits, in commit order, and never for one that rolls back. So a seat a customer failed to hold is never shown as taken, and every app instance hears every change.
+- Each instance `LISTEN`s on a dedicated connection (not one borrowed from the small free-tier pool) and fans changes out to browsers over **Server-Sent Events** (`GET /shows/{id}/seats/stream`). It reconnects with backoff if that connection drops.
+- **The client subscribes first, then fetches.** The stream sends `ready`, then the browser fetches the map and replays any events that arrived meanwhile, so no change slips through between the snapshot and the stream. A dropped stream reconnects and refetches.
 
-**Caching**
-- The course catalog is cached and evicted on any change to courses or seat counts.
-- The admin dashboard aggregates are cached with a 60s TTL, so they can be up to a minute stale.
-- Redis when `REDIS_ENABLED=true` (shared across instances, typed JSON values), Caffeine in-process otherwise.
-- Evictions are **transaction-aware**: they run after commit, so a concurrent reader can't re-cache data that is about to change.
-- Cache errors fall through to the database instead of failing the request.
+### Waitlist
+- Seats freed by an expired hold or a cancellation are already locked by the transaction that frees them. That same transaction hands them to the oldest waiting customers whose request fits, as a new hold. The public never sees them free in between, and no further locks are taken, so this can't deadlock with customers.
 
-**Rate limiting**
-- Per client IP, using an atomic fixed-window counter: a Redis Lua script (`INCR` + `PEXPIRE` in one step) or in memory.
-  - Login: 10/min
-  - Demo login: 20/min
-  - Token refresh: 30/min
-  - Everything else: 300/min
-- Responses carry `X-RateLimit-*` headers; rejected requests get **429** with `Retry-After`.
-- If Redis is down, the limiter **fails open** behind a circuit breaker, so it doesn't add a timeout to every request.
+### Reliable emails (transactional outbox)
+- Bookings, cancellations, waitlist offers, refunds and sign-ups write an event to `outbox_events` **in the same transaction** as the change. A rolled-back change never sends an email, and an email is never lost because the broker or SMTP was down.
+- `OutboxRelay` delivers events right after commit and polls every 30s as a safety net. It claims batches with `FOR UPDATE SKIP LOCKED` (several instances can relay at once) and backs off exponentially, marking an event `FAILED` after 10 attempts.
+- With `RABBIT_ENABLED=true`, events go through RabbitMQ with publisher confirms, consumer retries and a **dead-letter queue**. Without a broker, the same relay hands events to the consumer in-process.
+- **Idempotent consumer:** the message id is recorded in the same transaction as the handling, so a redelivered message sends one email.
 
-**Resilience**
-- Resilience4j circuit breakers around SMTP and Redis.
-- Bounded retries with backoff in the outbox and in the RabbitMQ consumer, plus a DLQ.
-- Render's health check uses `/actuator/health/liveness`, which never depends on Redis, RabbitMQ or SMTP. An outage of an optional dependency degrades a feature instead of restarting the container.
+### Idempotent APIs
+- Holding seats, starting a payment, joining a waitlist, cancelling a booking and the admin create/cancel calls accept an `Idempotency-Key` header (Stripe-style). A retry with the same key replays the original response (`Idempotent-Replayed: true`) instead of acting twice.
+  - Same key while the first request is still running: **409**. Same key with a different body: **422**. 5xx responses aren't stored, so they can be retried.
+- The frontend sends a fresh key per action and retries network failures with the same key, which matters while the free-tier server wakes up.
 
-**Admin insight pages** (`GET /admin/notifications`, `GET /admin/system`)
-- The Emails page joins the outbox rows with a `notification_log` table that the consumer writes in the same transaction as the de-duplication record. It shows each email as queued, retrying (with the next attempt time), in the broker, sent, logged only, or failed. Bodies are stored with the temporary password masked.
-- The System page reads the Micrometer registry (the same data `/actuator/prometheus` exports) together with the cache statistics, outbox counts and Resilience4j state. Polling of `/admin` and `/actuator` is excluded from the traffic numbers.
+### Authentication
+- 15-minute JWT access tokens, and 7-day **rotating refresh tokens**: random 256-bit values stored only as SHA-256 hashes. Every refresh revokes the old token. If an already-rotated token shows up again, the session was copied (e.g. stolen), so the whole token family is revoked.
+- Roles: `ROLE_CUSTOMER` (books) and `ROLE_ADMIN` (runs the cinemas). Browsing is public.
+- Brute-force protection: a 30-minute lockout after 5 wrong passwords and a permanent block after 10. BCrypt hashing and a password-strength policy.
 
-**Observability**
-- **Metrics:** `/actuator/prometheus`, protected with HTTP Basic (user `metrics`, `METRICS_PASSWORD`). It exposes:
-  - HTTP latency histograms and JVM/Hikari/cache metrics
-  - `@Observed` timers for `auth.login` and `enrollment.enroll`, tagged with the outcome
-  - outbox pending/failed gauges and relay counters
-  - rate-limit rejections
-  - circuit-breaker state
-- **Tracing:** Micrometer Tracing with an OpenTelemetry bridge. Trace and span ids appear in every log line, and spans are exported over OTLP when `MANAGEMENT_OTLP_TRACING_ENDPOINT` is set (e.g. Jaeger).
-- **Request ids:** every response carries `X-Request-Id`. The caller's id is used if it's well-formed, otherwise a UUID is generated, and it goes into the MDC so a reported error can be matched to its logs.
-- **Logs:** JSON (Elastic Common Schema) in production.
+### Caching, rate limiting, resilience
+- The city home page ("now showing") and the admin dashboard are cached. Redis when `REDIS_ENABLED=true`, Caffeine otherwise. Evictions run after commit, and cache errors fall through to the database.
+- **Rate limits** per client IP, using an atomic fixed-window counter (a Redis Lua script or in memory): login 10/min, sign-up 5/min, demo login 20/min, token refresh 30/min, everything else 300/min. Rejected requests get **429** with `Retry-After`. If Redis is down, the limiter fails open behind a circuit breaker.
+- Resilience4j circuit breakers around SMTP and Redis. The health check (`/actuator/health/liveness`) never depends on optional services.
 
-**Schema migrations**
-- **Flyway** owns the schema and Hibernate only validates it (`ddl-auto=validate`), so a mismatched deploy fails at startup instead of altering production tables.
-- The migrations:
-  - `V1` is the baseline: the exact schema Hibernate had created.
-  - `V2` adds missing foreign-key indexes.
-  - `V3` adds the outbox and processed-message tables.
-  - `V4` adds the idempotency-key table.
-  - `V5` adds the notification log.
-- Existing databases are baselined at V1 automatically.
+### Observability
+- **Metrics** at `/actuator/prometheus` (HTTP Basic, user `metrics`): HTTP latency histograms, JVM/Hikari/cache metrics, `@Observed` timers for logins and seat holds, outbox gauges, rate-limit rejections and circuit-breaker states.
+- **Tracing:** Micrometer Tracing with OpenTelemetry. Trace ids appear in every log line, and spans are exported over OTLP when `MANAGEMENT_OTLP_TRACING_ENDPOINT` is set.
+- Every response carries `X-Request-Id`. Production logs are JSON (Elastic Common Schema).
+- Admin pages show this live: **Emails** shows each notification moving through the outbox (queued, retrying, sent, logged only, failed). **System** shows traffic, cache hit rates, the outbox backlog, rate-limit rejections, circuit breakers and the JVM heap, plus a button that sends wrong logins until the limit answers 429.
+
+### Schema
+Flyway owns the schema and Hibernate only validates it, so a mismatched deploy fails at startup instead of altering production tables. The migrations:
+- `V1` identity: users, refresh tokens, login security.
+- `V2` catalog: cities, cinemas, screens, seats, movies, shows, prices.
+- `V3` bookings.
+- `V4` outbox, processed messages, notification log, idempotency keys.
+- `V5` reference cities.
+- `V6` holds, payments, webhook events, waitlist.
 
 ## ✅ Features
-| | Admin | Student |
+
+| | Customer | Admin |
 |---|---|---|
-| **Dashboard** | Totals, average attendance, students below 75%, course fill, students per department | CGPA, credits, attendance with warnings, current courses, notices |
-| **Courses** | Create, edit, close or delete courses; roster with grades; attendance per class date | Catalog with seats left; enroll and drop |
-| **Grades** | Assign O / A+ / A / B+ / B / C / P / F | Grades, SGPA per term, CGPA |
-| **Announcements** | Post to everyone or one department | Feed filtered to their department |
-| **Students** | Full CRUD, search, filters, per-student academic record | Own profile |
+| **Browse** | City picker, now showing with language/genre filters, coming soon, movie details, date strip, showtimes by cinema with availability | All movies, cinemas and screens |
+| **Book** | Live seat map (Recliner / Prime / Classic), up to 10 seats, 10-minute hold with a countdown, mock payment, ticket with reference | — |
+| **After booking** | My bookings, cancel up to 2 hours before for a refund | Latest bookings across all cinemas |
+| **Sold out** | Waitlist (1–6 seats), place in line, "Pay now" when seats are offered | — |
+| **Manage** | Account, change password | Add/edit movies, add cinemas, build a screen's seat layout (rows, categories, aisles), schedule shows (no overlaps on a screen, plus 15 minutes to clean), cancel a show (every booking refunded and emailed) |
+| **Insight** | — | Sales dashboard (today, last 7 days, top movies, busiest shows), Emails, System |
 
-**Academic rules (enforced server-side)**
-- Enrollment only while a course is open, within its capacity, and up to **24 credits per term**; no duplicate or repeat enrollment
-- Dropping keeps the history; re-enrolling reactivates the same record
-- Attendance is one record per student per class date, editable (upsert), never for future dates; **75% minimum** warnings
-- Credit-weighted **SGPA/CGPA** on the 10-point scale (UGC CBCS); failed courses count with 0 points and earn no credits
-- A course with enrollments can't be deleted, and its capacity can't drop below the seats already taken
+**Frontend:** React 18, TypeScript (strict), Vite, Tailwind CSS. Dark theme with generated posters, accessible dialogs and forms, single-flight token refresh, route guards per role, times always in IST, and a "server is waking up" notice for cold starts.
 
-**Demo mode** (`DEMO_ENABLED=true`)
-- Seeds a realistic, date-relative dataset: 12 courses across two terms, 36 students in 3 departments, a graded previous term, about 7 weeks of attendance, and notices
-- Passwordless **Try as Admin / Try as Student** (`POST /auth/demo-login`), so no credentials are published
-- Optional nightly reset (`DEMO_RESET_CRON`) undoes visitors' changes; admin accounts are kept
+**Demo mode** (`DEMO_ENABLED=true`): seeds 8 cinemas in Mumbai, Bengaluru, Delhi NCR and Bhubaneswar (two screens each), 10 movies, shows from yesterday to two days ahead, and realistic bookings. Passwordless demo logins mean no credentials are published. `DEMO_RESET_CRON` reseeds around the new day each night.
 
-**Students**
-- Full CRUD for students (admin only)
-- Pagination, sorting (whitelisted fields) and filtering (name/email search, department, branch) using JPA Specifications
-- Students can view their own profile
-- Updating a student's email keeps their login email in sync and revokes their sessions
+## 🛠️ Tech stack
+- **Backend:** Java 21, Spring Boot 3.4 (Web, Data JPA, Security, Validation), PostgreSQL, Flyway, JWT (jjwt), Redis, RabbitMQ (Spring AMQP), Resilience4j, Spring Mail, Micrometer (Prometheus, OpenTelemetry), springdoc OpenAPI, Lombok, Maven
+- **Frontend:** React 18, TypeScript, Vite, React Router, Tailwind CSS ([`frontend/`](frontend))
+- **Testing:** JUnit 5, Mockito, MockMvc, Testcontainers (PostgreSQL, RabbitMQ, Redis), Awaitility, JaCoCo; Vitest and Testing Library
+- **Infrastructure:** Docker, Docker Compose, GitHub Actions, Render, Neon, Vercel
 
-**Authentication & security**
-- Stateless JWT authentication with role-based access (`ROLE_ADMIN`, `ROLE_STUDENT`)
-- Short-lived access tokens (15 min) and refresh tokens (7 days) stored in the database so they can be revoked on logout
-- Temporary password on registration that expires after 48 hours and allows 3 attempts, emailed to the student through the outbox (and shown once to the admin)
-- Enrollment confirmation emails
-- First login is forced to a password change: until then the token only works for change-password, refresh and logout
-- Brute-force protection: a 30-minute lockout after 5 failed attempts and a permanent block after 10
-- BCrypt password hashing and a password-strength policy
+## 📌 API
 
-**Engineering**
-- DTO pattern with Bean Validation
-- Global exception handling with consistent JSON errors and the correct HTTP status codes (including 409 for races, 422/409 for idempotency conflicts, 429 for rate limits)
-- Audit fields (`createdAt`, `updatedAt`)
-- Interactive API docs with Swagger UI
-- `dev` / `prod` profiles, with all production secrets supplied through environment variables
-- CORS configured for a separately hosted frontend
-- Multi-stage Docker image, non-root and tuned for small containers
-- CI on every push and PR: backend tests with coverage, frontend tests and build, and a Docker build
+Full, interactive docs: **[Swagger UI](https://student-service-w3vr.onrender.com/swagger-ui.html)**. Amounts are in paise.
 
-**Frontend**
-- Admin dashboard: debounced search, department/branch filters, sortable columns, pagination, and create/edit/delete dialogs
-- Temporary password shown once, with a copy button, after registering a student
-- First-login flow that forces a password change, with a live password-policy checklist
-- Student profile page
-- Transparent token refresh (one request at a time) and automatic sign-out when the session expires
-- Role-based route guards, plus a "server is waking up" notice for free-tier cold starts
-- Accessible forms and dialogs (labels, `aria-*`, keyboard support), responsive layout
-
-## 🚀 Setup & Run
-
-### Prerequisites
-- Java 21
-- PostgreSQL
-- Node.js 20+ (frontend)
-
-### Environment Variables
-| Variable | Required | Description |
+| Area | Endpoints | Access |
 |---|---|---|
-| `JWT_SECRET` | Yes | Random secret, at least 32 characters |
-| `DB_URL` | No (dev) | Default `jdbc:postgresql://localhost:5432/studentdb` |
-| `DB_USERNAME` / `DB_PASSWORD` | Yes | Database credentials |
-| `SPRING_PROFILES_ACTIVE` | No | `dev` (default) or `prod` |
-| `CORS_ALLOWED_ORIGINS` | No | Comma-separated frontend origins. Default `http://localhost:5173,http://localhost:3000` |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Prod | Initial admin account, created on startup if it doesn't exist |
-| `PORT` | No | Port to listen on (default `8080`; set automatically by Render) |
-| `DEMO_ENABLED` | No | `true` seeds demo data and enables the demo logins (public demo deployments only) |
-| `DEMO_RESET_CRON` | No | Spring cron for a demo reset, e.g. `0 0 3 * * *`. **Wipes all students and academic data** (admins kept) |
-| `REDIS_ENABLED` / `REDIS_URL` | No | `true` + e.g. `rediss://default:<password>@<host>:6379` for a shared cache and rate limits. Default: in-process |
-| `RABBIT_ENABLED` / `RABBITMQ_URL` | No | `true` + e.g. `amqps://<user>:<password>@<host>/<vhost>` to relay events through RabbitMQ. Default: in-process |
-| `SPRING_MAIL_HOST` / `SPRING_MAIL_PORT` / `SPRING_MAIL_USERNAME` / `SPRING_MAIL_PASSWORD` | No | SMTP server for real emails (e.g. Brevo, port 587). Without it emails are only logged |
-| `MAIL_ALLOWED_RECIPIENTS` | No | Comma-separated addresses or `@domain`s that get real email. **Required for real email in demo mode** (visitors can register any address); elsewhere it restricts who gets real email. A registered student only receives the welcome email if their address is on this list |
-| `MAIL_FROM` / `APP_SIGN_IN_URL` | No | Sender address (must be verified with your SMTP provider), and a sign-in link to include in emails |
-| `METRICS_PASSWORD` | No | Enables `/actuator/prometheus` for user `metrics` (HTTP Basic) |
-| `MANAGEMENT_OTLP_TRACING_ENDPOINT` | No | OTLP endpoint for traces, e.g. `http://localhost:4318/v1/traces` |
-| `DATA_ENCRYPTION_KEY` | No | Base64 32-byte AES key for encrypted data at rest. Default: derived from `JWT_SECRET` |
-| `RATE_LIMIT_ENABLED` | No | `false` turns rate limiting off (default `true`) |
+| Browse | `GET /cities`, `/cities/{id}/home`, `/movies/{id}`, `/movies/{id}/showtimes?cityId=&date=`, `/shows/{id}`, `/shows/{id}/seats` | Public |
+| Live seats | `GET /shows/{id}/seats/stream` (SSE: `ready`, `seats`, `reload`) | Public |
+| Checkout | `POST /shows/{id}/holds`, `GET`/`DELETE /holds/{id}`, `POST /holds/{id}/payments`, `POST /mock-gateway/payments/{ref}` | Customer |
+| Webhook | `POST /webhooks/payments` (HMAC signature instead of a JWT) | Gateway |
+| Bookings | `GET /bookings/me`, `GET /bookings/{ref}`, `POST /bookings/{ref}/cancel` | Customer (admins can view any) |
+| Waitlist | `POST /shows/{id}/waitlist`, `GET /waitlist/me`, `DELETE /waitlist/{id}` | Customer |
+| Auth | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/change-password`, `GET /auth/me`, `/auth/demo`, `POST /auth/demo-login` | Mixed |
+| Admin | `/admin/dashboard`, `/admin/bookings`, `/admin/movies`, `/admin/cinemas`, `/admin/cinemas/{id}/screens`, `/admin/cinemas/{id}/shows`, `/admin/shows`, `/admin/shows/{id}/cancel`, `/admin/notifications`, `/admin/system` | Admin |
 
-### Run
+## 🚀 Run locally
+
+**Prerequisites:** Java 21, PostgreSQL (or Docker), Node.js 20+.
+
 ```bash
+# Backend: demo data on, an admin account seeded in the dev profile (admin@seatsure.dev / Admin@123)
+DB_URL=jdbc:postgresql://localhost:5432/seatsure DB_USERNAME=<user> DB_PASSWORD=<password> \
+JWT_SECRET=local-dev-secret-that-is-at-least-thirty-two-characters DEMO_ENABLED=true \
 ./mvnw spring-boot:run
-```
 
-- API docs (Swagger UI): http://localhost:8080/swagger-ui.html
-- Health check: http://localhost:8080/actuator/health
-- In the `dev` profile, an admin account is seeded: `admin@college.com` / `Admin@123`.
-
-### Run the full stack locally (Docker)
-`docker compose up -d` starts PostgreSQL, Redis, RabbitMQ, Jaeger, Prometheus and Grafana. Then:
-
-```bash
-DB_URL=jdbc:postgresql://localhost:5432/studentdb DB_USERNAME=student DB_PASSWORD=student \
-REDIS_ENABLED=true RABBIT_ENABLED=true METRICS_PASSWORD=local-metrics \
-MANAGEMENT_OTLP_TRACING_ENDPOINT=http://localhost:4318/v1/traces \
-JWT_SECRET=local-dev-secret-that-is-at-least-thirty-two-characters ./mvnw spring-boot:run
-```
-
-- RabbitMQ UI (queues, the DLQ): http://localhost:15672 (guest/guest)
-- Traces: http://localhost:16686 (Jaeger)
-- Metrics: http://localhost:9090 (Prometheus)
-- Dashboards: http://localhost:3001 (Grafana, admin/admin; Prometheus and Jaeger are pre-provisioned as data sources)
-
-### Frontend
-```bash
+# Frontend
 cd frontend
 cp .env.example .env.local    # VITE_API_BASE_URL=http://localhost:8080
 npm install
 npm run dev                   # http://localhost:5173
 ```
 
-## 📌 API Endpoints
+**The whole stack with Docker:** `docker compose up -d` starts PostgreSQL (database, user and password all `seatsure`), Redis, RabbitMQ, Jaeger, Prometheus and Grafana. Then add `REDIS_ENABLED=true RABBIT_ENABLED=true METRICS_PASSWORD=local-metrics MANAGEMENT_OTLP_TRACING_ENDPOINT=http://localhost:4318/v1/traces` to the backend command above.
+- RabbitMQ UI: http://localhost:15672 (guest/guest)
+- Jaeger: http://localhost:16686
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3001 (admin/admin)
 
-### Auth
-| Method | Endpoint | Access | Description |
-|--------|----------|--------|-------------|
-| POST | `/auth/login` | Public | Log in and receive access + refresh tokens |
-| POST | `/auth/refresh` | Public (refresh token) | Get a new access token |
-| POST | `/auth/logout` | Public (refresh token) | Revoke all of the user's refresh tokens |
-| POST | `/auth/change-password` | Authenticated | Change your own password |
-
-### Students
-| Method | Endpoint | Access | Description |
-|--------|----------|--------|-------------|
-| POST | `/students` | Admin | Register a student (returns `201` + `Location`) |
-| GET | `/students` | Admin | List students (paginated, filterable) |
-| GET | `/students/{id}` | Admin | Get a student |
-| PUT | `/students/{id}` | Admin | Update a student |
-| DELETE | `/students/{id}` | Admin | Delete a student and their account (`204`) |
-| GET | `/students/me` | Student | View your own profile |
-
-### Courses & academics
-| Method | Endpoint | Access | Description |
-|--------|----------|--------|-------------|
-| GET | `/courses` | Signed in | Catalog with seats taken (`search`, `department`, `term`) |
-| POST / PUT / DELETE | `/courses`, `/courses/{id}` | Admin | Manage courses |
-| GET | `/courses/{id}/roster` | Admin | Students with grades and attendance |
-| GET / POST | `/courses/{id}/attendance` | Admin | Attendance sheet for a date / record or update it |
-| POST / DELETE | `/courses/{id}/enroll` | Student | Enroll / drop |
-| PUT | `/enrollments/{id}/grade` | Admin | Assign a grade (completes the course) |
-| GET | `/students/me/academics` | Student | Own record: courses, grades, attendance, SGPA/CGPA |
-| GET | `/students/{id}/academics` | Admin | A student's record |
-| GET / POST / DELETE | `/announcements` | Read: signed in · write: admin | Notices (students see general plus their department's) |
-| GET | `/dashboard/admin`, `/dashboard/student` | Per role | Dashboards |
-| GET / POST | `/auth/demo`, `/auth/demo-login` | Public | Demo availability / passwordless demo sign-in |
-
-**Headers:** send `Idempotency-Key: <uuid>` on the POSTs above to make retries safe. Every response has `X-Request-Id`, and rate-limited responses have `X-RateLimit-Limit`, `X-RateLimit-Remaining` and, on 429, `Retry-After`.
-
-**Student list query parameters:** `search`, `department`, `branch`, `page` (default `0`), `size` (default `10`, max `100`), `sortBy` (`id`, `name`, `email`, `department`, `branch`, `dateOfBirth`, `createdAt`), `direction` (`asc`/`desc`).
-
-### Example: register a student
-```http
-POST /students
-Authorization: Bearer <admin access token>
-Content-Type: application/json
-
-{
-  "name": "John Doe",
-  "email": "john@gmail.com",
-  "department": "Engineering",
-  "branch": "CSE",
-  "dateOfBirth": "2003-05-14",
-  "presentAddress": "Bhubaneswar",
-  "permanentAddress": "Cuttack"
-}
-```
-
-### Typical first-login flow
-1. The admin registers the student. The student is emailed the temporary password, and the response also contains it once for the admin (it is never shown again).
-2. The student calls `POST /auth/login` with the temporary password and gets a restricted token (`isFirstTimeLogin: true`).
-3. The student calls `POST /auth/change-password` with `oldPassword`, `newPassword` and `confirmNewPassword`.
-4. The student calls `POST /auth/refresh` to get a normal access token.
+### Environment variables
+| Variable | Required | Description |
+|---|---|---|
+| `JWT_SECRET` | Yes | Random secret, at least 32 characters |
+| `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | Yes | PostgreSQL connection (default URL `jdbc:postgresql://localhost:5432/seatsure`) |
+| `SPRING_PROFILES_ACTIVE` | No | `dev` (default) or `prod` |
+| `CORS_ALLOWED_ORIGINS` | No | Comma-separated frontend origins (default `http://localhost:5173,http://localhost:3000`) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Prod | Admin account created on startup if it doesn't exist |
+| `DEMO_ENABLED` / `DEMO_RESET_CRON` | No | Seed demo data and enable demo logins; optional cron to reseed (e.g. `0 0 3 * * *`). **The reset wipes the catalogue, bookings and customers** (admins are kept) |
+| `PAYMENT_WEBHOOK_SECRET` | No | HMAC key for payment webhooks (default: derived from `JWT_SECRET`) |
+| `PAYMENT_WEBHOOK_URL` | No | Where the mock gateway sends webhooks (default: this server) |
+| `REALTIME_ENABLED` | No | `false` turns off the live seat stream (default `true`) |
+| `REDIS_ENABLED` / `REDIS_URL` | No | Shared cache and rate limits (default: in-process) |
+| `RABBIT_ENABLED` / `RABBITMQ_URL` | No | Relay events through RabbitMQ (default: in-process) |
+| `SPRING_MAIL_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` | No | SMTP for real emails (e.g. Brevo). Without it, emails are only logged |
+| `MAIL_ALLOWED_RECIPIENTS` | No | Addresses or `@domain`s that get real email. **Required for real email in demo mode**, since visitors can sign up with any address |
+| `MAIL_FROM` / `APP_URL` | No | Sender address, and the frontend URL used for links in emails |
+| `METRICS_PASSWORD` | No | Enables `/actuator/prometheus` for user `metrics` |
+| `MANAGEMENT_OTLP_TRACING_ENDPOINT` | No | OTLP endpoint for traces |
+| `DATA_ENCRYPTION_KEY` | No | Base64 32-byte AES key for data encrypted at rest (default: derived from `JWT_SECRET`) |
+| `RATE_LIMIT_ENABLED` | No | `false` turns rate limiting off |
+| `PORT` | No | Default `8080` (set automatically by Render) |
 
 ## 🧪 Testing
 
 ```bash
-./mvnw test                 # backend: 230 tests (20 of them need Docker, see below)
-cd frontend && npm test     # frontend: 60 tests
+./mvnw test                 # backend (integration tests need Docker)
+cd frontend && npm test     # frontend
 ```
 
-### Backend
-Unit and web-layer tests need nothing installed. The **integration tests use Testcontainers** (real PostgreSQL 18, RabbitMQ and Redis in Docker). They're skipped automatically when Docker isn't available, and CI always runs them.
+CI runs everything on every push and PR, and **fails if any test is skipped**, so integration tests can't silently stop running.
 
-| Layer | Tooling | What's covered |
-|---|---|---|
-| Services | JUnit 5, Mockito, AssertJ | Every login path (temporary password, 30-min lockout, permanent block, auto-unblock), password change, refresh/logout, all student CRUD paths, and the outbox event written on registration (with the encrypted password) |
-| Web/security | `@WebMvcTest`, MockMvc, real signed JWTs | Role-based access, first-login restriction, public vs authenticated endpoints, validation and error → HTTP status mapping (incl. 409 for constraint races), request ids |
-| Persistence | `@DataJpaTest`, **Testcontainers PostgreSQL** | Flyway migrations + Hibernate schema validation, Specifications, nested-field sorting and paging, shared-primary-key mappings, auditing, token revoke/delete queries |
-| Concurrency | `@SpringBootTest`, Testcontainers | 30 threads racing for 5 seats → exactly 5 enrollments; 8 concurrent enrollments by one student → exactly 24 credits |
-| Outbox & messaging | `@SpringBootTest`, Testcontainers PostgreSQL + **RabbitMQ**, Awaitility | Emails sent after commit (once each); no event for a rolled-back transaction; publisher confirms; duplicate messages processed once; a failing message retried, then dead-lettered |
-| Idempotency | MockMvc over the full app + unit tests | Replay of the stored response, 409 for concurrent duplicates, 422 for a reused key with a different body, keys released after 5xx, encrypted storage |
-| Rate limiting & cache | Unit tests + **Testcontainers Redis** | Limits per rule and client, concurrent counting, 429 + `Retry-After` through the real filter chain, Redis Lua script and TTL, fail-open, typed JSON cache values |
-| Observability | Full app | Liveness public, `/actuator/prometheus` protected and exposing the business metrics |
-| Academics | JUnit 5, Mockito | Enrollment rules (closed, full, duplicate, completed, credit limit, re-enroll), lock order, drop rules, grading, SGPA/CGPA maths, attendance upsert, course rules |
-| Demo & JWT | `@DataJpaTest`, JUnit 5 | Seeding and reset against PostgreSQL; token claims, types, and rejection of expired, forged and tampered tokens |
-
-Each bug fixed earlier has a regression test marked `regression:` in its display name. A coverage report is generated at `target/site/jacoco/index.html`.
-
-### Frontend
-Vitest and Testing Library, with `fetch` mocked:
-- **API client:** auth header, single-flight token refresh, sign-out when the refresh token is rejected, parsing of errors and field errors, and `Idempotency-Key` retries on network failures
-- **Route guards:** sign-in required, first-login password change enforced, role checks
-- **Academics:** demo login, both dashboards, catalog enroll/refusal/full/closed states, grading from the roster, taking attendance, announcements per role
-- **Pages:** login (including a generic message that doesn't reveal whether an account exists), student list, search, create with the temporary-password dialog, client-side validation, duplicate-email handling, delete, and the password-change flow
+| Area | What's covered |
+|---|---|
+| Concurrency (Testcontainers PostgreSQL) | 30 customers racing for one seat → one winner; overlapping seat sets → no double holds, no deadlocks; all-or-nothing holds; holds replaced and expired; show cancellation racing holds |
+| Payments | Unsigned or forged webhooks refused, redelivered events processed once, a second success for a paid payment ignored, money arriving after the hold lapsed refunded |
+| Live seat map | A hold shows up on open seat maps and a failed hold never does; a cancelled show tells maps to reload |
+| Waitlist | Only for sold-out shows; freed seats offered to the first customer whose request fits, passing to the next if unpaid; cancelled bookings' seats go to the queue |
+| Outbox & messaging (PostgreSQL + RabbitMQ) | Emails after commit only, publisher confirms, duplicates processed once, retries then dead-lettering |
+| Idempotency, rate limiting, cache (Redis) | Replays, 409/422 conflicts, limits per rule, 429 through the real filter chain, fail-open |
+| Auth | Token rotation and reuse detection, lockouts, role-based access |
+| Frontend | API client (refresh rotation, retries), live seat map hook against a fake `EventSource`, and the booking flow: city picker, seat selection, hold conflicts, waitlist, checkout and webhook polling, cancel, route guards, demo login |
 
 ## ☁️ Deployment (free tier)
 
 | Component | Host |
 |---|---|
-| Backend | [Render](https://render.com) free web service (Docker) |
+| Backend | [Render](https://render.com) free web service (Docker), from [`render.yaml`](render.yaml) |
 | Database | [Neon](https://neon.tech) free PostgreSQL |
-| Frontend | [Vercel](https://vercel.com) (static site from `frontend/`) |
+| Frontend | [Vercel](https://vercel.com), root directory `frontend/` |
 
-> Render's free services sleep after about 15 minutes of inactivity, so the first request afterwards can take up to a minute while the app starts.
+1. **Neon:** create a project near your Render region and copy the **direct** (non-`-pooler`) connection string. The live seat map needs `LISTEN`, which the pooler doesn't support. Split it into `DB_URL=jdbc:postgresql://HOST/DBNAME?sslmode=require`, `DB_USERNAME` and `DB_PASSWORD`.
+2. **Render:** **New → Blueprint**, select the repo, and enter the secrets it asks for (`DB_*`, `ADMIN_*`, `CORS_ALLOWED_ORIGINS`). `JWT_SECRET` is generated. Render only redeploys when backend files change.
+3. **Vercel:** import the repo with root directory `frontend`, set `VITE_API_BASE_URL` to the Render URL, then add the Vercel URL to `CORS_ALLOWED_ORIGINS` on Render.
 
-### 1. Database (Neon)
-1. Create a project, choosing a region close to your Render region (for example AWS Singapore).
-2. Copy the **direct** connection string (the host without `-pooler`). The app keeps its own connection pool, and Hibernate applies schema changes at startup. Neon shows a URL like `postgresql://USER:PASSWORD@HOST/DBNAME?sslmode=require`. Spring needs it split up:
-   - `DB_URL` = `jdbc:postgresql://HOST/DBNAME?sslmode=require`
-   - `DB_USERNAME` = `USER`
-   - `DB_PASSWORD` = `PASSWORD`
-
-### 2. Backend (Render)
-1. Push this repo to GitHub, then in Render choose **New → Blueprint** and select the repo. Render reads [`render.yaml`](render.yaml).
-2. Enter the secrets it asks for: `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `CORS_ALLOWED_ORIGINS` (your Vercel URL). `JWT_SECRET` is generated automatically.
-3. Render builds the [`Dockerfile`](Dockerfile) and checks `/actuator/health`. Swagger UI is then live at `https://<your-service>.onrender.com/swagger-ui.html`.
-
-Docker is not needed on your machine: Render and GitHub Actions build the image. Render only redeploys when backend files change (`buildFilter` in `render.yaml`).
-
-### 3. Frontend (Vercel)
-1. In Vercel choose **Add New → Project**, import the repo, and set **Root Directory** to `frontend`. Vite is detected automatically.
-2. Add the environment variable `VITE_API_BASE_URL` = `https://<your-service>.onrender.com`.
-3. Deploy, then add the Vercel URL to `CORS_ALLOWED_ORIGINS` on Render (comma-separated with any existing origins).
-
-[`vercel.json`](frontend/vercel.json) adds SPA routing and security headers, and skips builds when nothing under `frontend/` changed.
-
-### 4. Optional free add-ons
-Everything works without these (in-process fallbacks). To run the full distributed setup:
-
-| Add-on | Free service | Render environment variables |
-|---|---|---|
-| Redis | [Upstash](https://upstash.com) Redis database | `REDIS_ENABLED=true`, `REDIS_URL=rediss://default:<password>@<host>:6379` |
-| RabbitMQ | [CloudAMQP](https://www.cloudamqp.com) "Little Lemur" plan | `RABBIT_ENABLED=true`, `RABBITMQ_URL=<the AMQPS URL>` |
-| Metrics | any Prometheus / Grafana Cloud scraper | `METRICS_PASSWORD=<random>` |
-| Email | [Brevo](https://www.brevo.com) SMTP (300 emails/day free) | `SPRING_MAIL_HOST=smtp-relay.brevo.com`, `SPRING_MAIL_PORT=587`, `SPRING_MAIL_USERNAME=<SMTP login>`, `SPRING_MAIL_PASSWORD=<SMTP key>`, `MAIL_FROM=<verified sender>`, `MAIL_ALLOWED_RECIPIENTS=<your address>` |
-
-Database schema changes are applied by Flyway on startup. If Hibernate's validation ever fails, the new version won't pass Render's health check, and Render keeps the previous version running.
+Optional free add-ons (everything works without them): [Upstash](https://upstash.com) Redis, [CloudAMQP](https://www.cloudamqp.com) RabbitMQ, [Brevo](https://www.brevo.com) SMTP, and any Prometheus / Grafana Cloud scraper.
 
 ## 🔮 Upcoming
-- Store hashed (not raw) refresh tokens and rotate them on use, with reuse detection
+- Load test (k6) with published latency numbers for the seat-hold path
 - Replace the permanent account lock with per-account backoff (the IP rate limit already slows guessing)
-- Load test (k6) with published latency numbers

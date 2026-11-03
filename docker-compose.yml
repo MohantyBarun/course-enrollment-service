@@ -7,9 +7,9 @@ services:
   postgres:
     image: postgres:18-alpine
     environment:
-      POSTGRES_DB: studentdb
-      POSTGRES_USER: student
-      POSTGRES_PASSWORD: student
+      POSTGRES_DB: seatsure
+      POSTGRES_USER: seatsure
+      POSTGRES_PASSWORD: seatsure
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql]
 

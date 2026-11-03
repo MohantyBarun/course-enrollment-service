@@ -8,8 +8,8 @@
 		<version>3.4.4</version>
 		<relativePath/>
 	</parent>
-	<groupId>com.student</groupId>
-	<artifactId>StudentService</artifactId>
+	<groupId>com.seatsure</groupId>
+	<artifactId>seatsure</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name/>
 	<description/>
@@ -28,6 +28,9 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Boot 3.4.4 pins 1.20.6, which speaks Docker API 1.32; current Docker Engines (e.g. on GitHub
+		     runners) require 1.40+, so Testcontainers could not connect and every integration test was skipped -->
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
 	<dependencies>
 		<!-- JPA -->
@@ -46,7 +49,7 @@
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
+			<!-- compile scope: the live seat map uses the driver's LISTEN/NOTIFY API (PGConnection) -->
 		</dependency>
 
 		<!-- Lombok -->
@@ -226,10 +229,10 @@
 				<configuration>
 					<excludes>
 						<!-- Plain data holders and bootstrap code carry no logic worth measuring -->
-						<exclude>com/student/studentservice/StudentServiceApplication.class</exclude>
-						<exclude>com/student/studentservice/entity/**</exclude>
-						<exclude>com/student/studentservice/dto/**</exclude>
-						<exclude>com/student/studentservice/config/DataSeeder.class</exclude>
+						<exclude>com/seatsure/SeatSureApplication.class</exclude>
+						<exclude>com/seatsure/entity/**</exclude>
+						<exclude>com/seatsure/dto/**</exclude>
+						<exclude>com/seatsure/config/DataSeeder.class</exclude>
 					</excludes>
 				</configuration>
 				<executions>

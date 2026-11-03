@@ -1,6 +1,6 @@
 import { isExpired } from '../lib/jwt';
 import { tokenStore } from '../lib/tokens';
-import type { RefreshResponse } from './types';
+import type { TokenResponse } from './types';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080').replace(/\/$/, '');
 
@@ -10,6 +10,8 @@ export class ApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly fieldErrors: Record<string, string> = {},
+    /** The parsed error body, for endpoint-specific details (e.g. unavailableSeatIds on a 409). */
+    public readonly body: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -78,19 +80,15 @@ async function refreshAccessToken(): Promise<string> {
         sessionExpiredListeners.forEach((l) => l());
         throw new ApiError(401, 'Your session has expired. Please sign in again.');
       }
-      const { accessToken } = (await response.json()) as RefreshResponse;
-      tokenStore.setAccessToken(accessToken);
-      return accessToken;
+      // Refresh tokens rotate: the old one is now dead, so store the new pair before anything else runs
+      const pair = (await response.json()) as TokenResponse;
+      tokenStore.set({ accessToken: pair.accessToken, refreshToken: pair.refreshToken });
+      return pair.accessToken;
     })().finally(() => {
       refreshInFlight = null;
     });
   }
   return refreshInFlight;
-}
-
-/** Forces a refresh now (used after a password change to drop the restricted token). */
-export function forceRefresh(): Promise<string> {
-  return refreshAccessToken();
 }
 
 async function validAccessToken(): Promise<string | null> {
@@ -115,7 +113,7 @@ interface RequestOptions {
   idempotencyKey?: string;
 }
 
-/** A fresh key per user action (one form submit, one Enroll click). */
+/** A fresh key per user action (one form submit, one Pay click). */
 export function newIdempotencyKey(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
@@ -128,8 +126,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function parseError(response: Response): Promise<ApiError> {
   let message = `Request failed (${response.status})`;
   let fieldErrors: Record<string, string> = {};
+  let body: Record<string, unknown> = {};
   try {
     const data = await response.json();
+    if (data && typeof data === 'object') body = data;
     if (data?.errors && typeof data.errors === 'object') {
       fieldErrors = data.errors;
       message = 'Please correct the highlighted fields.';
@@ -142,7 +142,7 @@ async function parseError(response: Response): Promise<ApiError> {
   if (response.status === 403 && message.startsWith('Request failed')) {
     message = "You don't have permission to do that.";
   }
-  return new ApiError(response.status, message, fieldErrors);
+  return new ApiError(response.status, message, fieldErrors, body);
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
