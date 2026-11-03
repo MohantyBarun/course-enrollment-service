@@ -9,7 +9,7 @@ import java.util.Locale;
 /**
  * Sends real email only to approved recipients (exact addresses, or "@domain" for a whole domain)
  * and logs the rest. This is what makes real email safe on a public demo, where anyone can
- * register a student with any address.
+ * sign up with any address.
  */
 @Slf4j
 public class AllowlistEmailSender implements EmailSender {

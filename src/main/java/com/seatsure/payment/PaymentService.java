@@ -64,7 +64,7 @@ public class PaymentService {
     public PaymentStarted start(Long userId, Long holdId) {
         Instant now = clock.instant();
         SeatHold hold = holds.findByIdForUpdate(holdId)
-                .filter(h -> h.getUser().getId().equals(userId))
+                .filter(h -> h.isOwnedBy(userId))
                 .orElseThrow(() -> new ResourceNotFoundException("Hold not found"));
         if (!hold.isLive(now)) {
             throw new ConflictException(hold.getStatus() == SeatHold.Status.CONVERTED
@@ -144,7 +144,7 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public Payment pendingFor(Long userId, String gatewayRef) {
         Payment payment = payments.findByGatewayRef(gatewayRef)
-                .filter(p -> p.getUser().getId().equals(userId))
+                .filter(p -> p.isOwnedBy(userId))
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found"));
         if (payment.getStatus() != Payment.Status.PENDING) {
             throw new BadRequestException("This payment is already " + payment.getStatus().name().toLowerCase());

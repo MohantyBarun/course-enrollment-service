@@ -14,7 +14,7 @@ class RequestIdFilterTest {
     private final RequestIdFilter filter = new RequestIdFilter();
 
     private String run(String incoming, AtomicReference<String> mdcDuringRequest) throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/courses");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/cities");
         if (incoming != null) {
             request.addHeader(RequestIdFilter.HEADER, incoming);
         }

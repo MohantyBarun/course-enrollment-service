@@ -5,6 +5,7 @@ import com.seatsure.dto.AdminDtos.RowSpec;
 import com.seatsure.entity.*;
 import com.seatsure.repository.*;
 import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.BookingReferences;
 import com.seatsure.service.Roles;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -350,8 +351,6 @@ public class DemoDataService {
         return (int) (Math.round(rupees / 10.0) * 10) * 100;
     }
 
-    private static final char[] REF = "23456789ABCDEFGHJKMNPQRSTVWXYZ".toCharArray();
-
     /** Bound as timestamptz with an explicit offset, independent of the JVM and session time zones. */
     private static OffsetDateTime ts(Instant instant) {
         return instant.atOffset(ZoneOffset.UTC);
@@ -402,11 +401,7 @@ public class DemoDataService {
         String uniqueReference(Random random) {
             String ref;
             do {
-                StringBuilder sb = new StringBuilder("SS");
-                for (int i = 0; i < 8; i++) {
-                    sb.append(REF[random.nextInt(REF.length)]);
-                }
-                ref = sb.toString();
+                ref = BookingReferences.next(random);
             } while (!references.add(ref));
             return ref;
         }

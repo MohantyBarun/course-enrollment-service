@@ -16,8 +16,8 @@ public class NotificationConfig {
      * <ul>
      *   <li>No SMTP (SPRING_MAIL_HOST unset): emails are logged only.</li>
      *   <li>SMTP + MAIL_ALLOWED_RECIPIENTS: real email to allowlisted addresses, the rest logged.</li>
-     *   <li>SMTP on a public demo without an allowlist: logged only. Visitors can register students
-     *       with any address, so the demo must not email arbitrary people.</li>
+     *   <li>SMTP on a public demo without an allowlist: logged only. Visitors can sign up with
+     *       any address, so the demo must not email arbitrary people.</li>
      *   <li>SMTP otherwise: real email to everyone.</li>
      * </ul>
      */

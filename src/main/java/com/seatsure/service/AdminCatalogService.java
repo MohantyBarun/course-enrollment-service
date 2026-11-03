@@ -77,7 +77,7 @@ public class AdminCatalogService {
     @CacheEvict(cacheNames = CacheConfig.NOW_SHOWING, allEntries = true)
     @Transactional
     public MovieDetail updateMovie(Long id, MovieRequest request) {
-        Movie movie = movies.findById(id).orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + id));
+        Movie movie = movies.findById(id).orElseThrow(() -> ResourceNotFoundException.of("Movie", id));
         if (movie.getDurationMinutes() != request.durationMinutes()) {
             // Existing shows were scheduled (and checked for overlaps) with the old running time
             throw new BadRequestException("The running time can't change once the movie is created");
@@ -109,7 +109,7 @@ public class AdminCatalogService {
     @Transactional
     public CinemaView createCinema(CinemaRequest request) {
         City city = cities.findById(request.cityId())
-                .orElseThrow(() -> new ResourceNotFoundException("City not found: " + request.cityId()));
+                .orElseThrow(() -> ResourceNotFoundException.of("City", request.cityId()));
         if (cinemas.existsByCityIdAndNameIgnoreCase(city.getId(), request.name().trim())) {
             throw new ConflictException("A cinema with this name already exists in " + city.getName());
         }
@@ -121,7 +121,7 @@ public class AdminCatalogService {
     @Transactional
     public ScreenView createScreen(Long cinemaId, ScreenRequest request) {
         Cinema cinema = cinemas.findById(cinemaId)
-                .orElseThrow(() -> new ResourceNotFoundException("Cinema not found: " + cinemaId));
+                .orElseThrow(() -> ResourceNotFoundException.of("Cinema", cinemaId));
         if (screens.existsByCinemaIdAndNameIgnoreCase(cinemaId, request.name().trim())) {
             throw new ConflictException("This cinema already has a screen called " + request.name().trim());
         }
@@ -183,9 +183,9 @@ public class AdminCatalogService {
     @Transactional
     public AdminShowView createShow(ShowRequest request) {
         Movie movie = movies.findById(request.movieId())
-                .orElseThrow(() -> new ResourceNotFoundException("Movie not found: " + request.movieId()));
+                .orElseThrow(() -> ResourceNotFoundException.of("Movie", request.movieId()));
         Screen screen = screens.findWithCinema(request.screenId())
-                .orElseThrow(() -> new ResourceNotFoundException("Screen not found: " + request.screenId()));
+                .orElseThrow(() -> ResourceNotFoundException.of("Screen", request.screenId()));
         if (!request.startsAt().isAfter(clock.instant())) {
             throw new BadRequestException("The show must start in the future");
         }
@@ -248,7 +248,7 @@ public class AdminCatalogService {
     @Transactional
     public ShowCancelled cancelShow(Long showId, String reason) {
         // Waits for holds and payments in flight (they hold a shared lock) and blocks new ones
-        shows.lockForCancellation(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        shows.lockForCancellation(showId).orElseThrow(() -> ResourceNotFoundException.of("Show", showId));
         Show show = shows.findDetailed(showId).orElseThrow();
         if (show.getStatus() == ShowStatus.CANCELLED) {
             throw new ConflictException("This show is already cancelled");

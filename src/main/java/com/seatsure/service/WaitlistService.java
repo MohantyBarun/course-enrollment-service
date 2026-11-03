@@ -65,7 +65,7 @@ public class WaitlistService {
     @Transactional
     public WaitlistView join(Long userId, Long showId, int seatsWanted) {
         Instant now = clock.instant();
-        Show show = shows.findDetailed(showId).orElseThrow(() -> new ResourceNotFoundException("Show not found: " + showId));
+        Show show = shows.findDetailed(showId).orElseThrow(() -> ResourceNotFoundException.of("Show", showId));
         if (!show.isBookable(now)) {
             throw new BadRequestException("This show isn't taking bookings");
         }
@@ -88,7 +88,7 @@ public class WaitlistService {
     @Transactional
     public void leave(Long userId, Long entryId) {
         WaitlistEntry entry = waitlist.findByIdForUpdate(entryId)
-                .filter(e -> e.getUser().getId().equals(userId))
+                .filter(e -> e.isOwnedBy(userId))
                 .orElseThrow(() -> new ResourceNotFoundException("Waitlist entry not found"));
         if (entry.getStatus() != WaitlistEntry.Status.WAITING) {
             throw new ConflictException(entry.getStatus() == WaitlistEntry.Status.OFFERED

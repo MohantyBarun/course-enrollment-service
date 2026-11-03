@@ -37,7 +37,7 @@ class NotificationFeedServiceTest {
 
     private static OutboxEvent event(String email) {
         return OutboxEvent.pending("User", "1", OutboxEvents.USER_REGISTERED,
-                "{\"studentId\":1,\"name\":\"Asha\",\"email\":\"" + email + "\",\"encryptedTempPassword\":\"x\"}",
+                "{\"userId\":1,\"name\":\"Asha\",\"email\":\"" + email + "\"}",
                 LocalDateTime.now());
     }
 
@@ -47,7 +47,7 @@ class NotificationFeedServiceTest {
         log.setEventType(e.getEventType());
         log.setRecipient("asha@x.com");
         log.setSubject("Welcome to SeatSure");
-        log.setBodyPreview("Temporary password: ********");
+        log.setBodyPreview("Hi Asha, your SeatSure account is ready.");
         log.setDelivery(delivery);
         log.setDetail(delivery == NotificationLog.Delivery.SENT ? "Accepted by the SMTP server" : "Not sent: demo mode");
         log.setCreatedAt(LocalDateTime.now());
@@ -77,7 +77,7 @@ class NotificationFeedServiceTest {
         assertThat(feed.transport()).isEqualTo("In-process");
         assertThat(feed.entries()).extracting(NotificationFeedService.Entry::status)
                 .containsExactly(Status.SENT, Status.LOGGED, Status.QUEUED, Status.RETRYING, Status.FAILED);
-        assertThat(feed.entries().get(0).preview()).contains("********");
+        assertThat(feed.entries().get(0).preview()).as("from the delivery record").contains("your SeatSure account is ready");
         assertThat(feed.entries().get(2).recipient()).as("taken from the payload before delivery").isEqualTo("queued@x.com");
         assertThat(feed.entries().get(3).detail()).contains("SMTP timeout");
         assertThat(feed.entries().get(3).nextAttemptAt()).isNotNull();

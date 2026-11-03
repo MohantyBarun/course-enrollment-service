@@ -14,7 +14,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @Table(name = "bookings")
-public class Booking {
+public class Booking implements OwnedByUser {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

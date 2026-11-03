@@ -13,7 +13,7 @@ import java.time.Instant;
 @Setter
 @NoArgsConstructor
 @Table(name = "waitlist_entries")
-public class WaitlistEntry {
+public class WaitlistEntry implements OwnedByUser {
 
     /**
      * WAITING in the queue; OFFERED seats as a hold; FULFILLED (paid); LAPSED (the offer expired);
