@@ -1,9 +1,11 @@
 package com.seatsure.entity;
 
+import lombok.AccessLevel;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import org.springframework.data.annotation.CreatedDate;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -11,9 +13,9 @@ import java.util.Arrays;
 import java.util.List;
 
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 @Getter
-@Setter
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "movies")
 public class Movie {
 
@@ -47,14 +49,20 @@ public class Movie {
     @Column(name = "poster_url", length = 500)
     private String posterUrl;
 
+    @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt = Instant.now();
+    private Instant createdAt;
 
     @Column(name = "updated_at")
     private Instant updatedAt;
 
     public List<String> genreList() {
         return Arrays.stream(genres.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
+    }
+
+    public Movie(String title, String synopsis, int durationMinutes, String language, Certificate certificate,
+                 List<String> genres, LocalDate releaseDate, String posterUrl) {
+        update(title, synopsis, durationMinutes, language, certificate, genres, releaseDate, posterUrl);
     }
 
     /** Everything an admin can edit, normalised (trimmed; a blank poster URL means a generated poster). */

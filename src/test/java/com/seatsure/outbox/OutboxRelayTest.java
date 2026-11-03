@@ -102,7 +102,8 @@ class OutboxRelayTest {
     @Test
     void afterMaxAttempts_isMarkedFailed() throws Exception {
         OutboxEvent e = event();
-        e.setAttempts(2); // max is 3
+        e.markFailed("down", Instant.now(), 3);
+        e.markFailed("down", Instant.now(), 3); // two failed attempts so far; max is 3
         when(repository.lockNextBatch(any(), eq(2))).thenReturn(List.of(e));
         doThrow(new IllegalStateException("still down")).when(transport).send(any());
 

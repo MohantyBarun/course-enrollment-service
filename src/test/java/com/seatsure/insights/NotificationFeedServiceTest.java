@@ -43,16 +43,10 @@ class NotificationFeedServiceTest {
     }
 
     private static NotificationLog logFor(OutboxEvent e, NotificationLog.Delivery delivery) {
-        NotificationLog log = new NotificationLog();
-        log.setMessageId(e.getId());
-        log.setEventType(e.getEventType());
-        log.setRecipient("asha@x.com");
-        log.setSubject("Welcome to SeatSure");
-        log.setBodyPreview("Hi Asha, your SeatSure account is ready.");
-        log.setDelivery(delivery);
-        log.setDetail(delivery == NotificationLog.Delivery.SENT ? "Accepted by the SMTP server" : "Not sent: demo mode");
-        log.setCreatedAt(Instant.now());
-        return log;
+        return new NotificationLog(e.getId(), e.getEventType(), "asha@x.com", "Welcome to SeatSure",
+                "Hi Asha, your SeatSure account is ready.", delivery,
+                delivery == NotificationLog.Delivery.SENT ? "Accepted by the SMTP server" : "Not sent: demo mode",
+                Instant.now());
     }
 
     @Test
@@ -65,8 +59,9 @@ class NotificationFeedServiceTest {
         OutboxEvent retrying = event("retry@x.com");
         retrying.markFailed("SMTP timeout", Instant.now(), 10);
         OutboxEvent failed = event("dead@x.com");
-        failed.setAttempts(9);
-        failed.markFailed("SMTP 550", Instant.now(), 10);
+        for (int attempt = 1; attempt <= 10; attempt++) {
+            failed.markFailed("SMTP 550", Instant.now(), 10); // the 10th attempt gives up
+        }
         when(outboxRepository.findTop50ByOrderByCreatedAtDesc()).thenReturn(List.of(sent, logged, queued, retrying, failed));
         when(notificationLog.findByMessageIdIn(anyCollection()))
                 .thenReturn(List.of(logFor(sent, NotificationLog.Delivery.SENT), logFor(logged, NotificationLog.Delivery.SKIPPED)));

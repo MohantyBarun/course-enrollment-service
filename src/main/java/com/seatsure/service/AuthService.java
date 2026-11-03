@@ -76,7 +76,7 @@ public class AuthService {
         }
         User user = new User(request.name().trim(), email, passwordEncoder.encode(request.password()),
                 Roles.ROLE_CUSTOMER);
-        user.setPhone(request.phone() == null || request.phone().isBlank() ? null : request.phone().trim());
+        user.changePhone(request.phone());
         try {
             users.saveAndFlush(user);
         } catch (DataIntegrityViolationException e) {
@@ -168,7 +168,7 @@ public class AuthService {
         if (passwordEncoder.matches(request.newPassword(), user.getPassword())) {
             throw new BadRequestException("The new password must be different from the current one");
         }
-        user.setPassword(passwordEncoder.encode(request.newPassword()));
+        user.changePassword(passwordEncoder.encode(request.newPassword()));
         // Sign out every other session; the caller's access token stays valid until it expires (15 min)
         tokens.revokeAll(userId);
         log.info("Password changed for user {}", userId);

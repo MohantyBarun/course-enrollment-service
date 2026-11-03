@@ -3,7 +3,6 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 
@@ -13,7 +12,6 @@ import java.time.Instant;
  */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "seat_holds")
 public class SeatHold implements OwnedByUser {
@@ -84,5 +82,18 @@ public class SeatHold implements OwnedByUser {
     public void close(Status status, Instant now) {
         this.status = status;
         this.closedAt = now;
+    }
+
+    /** The price at the moment the seats were held; the customer pays exactly this. */
+    public void price(int seatCount, int ticketsPaise, int convenienceFeePaise) {
+        this.seatCount = seatCount;
+        this.ticketsPaise = ticketsPaise;
+        this.convenienceFeePaise = convenienceFeePaise;
+    }
+
+    /** Paid in time: the seats became this booking. */
+    public void convertTo(Booking booking, Instant now) {
+        this.booking = booking;
+        close(Status.CONVERTED, now);
     }
 }

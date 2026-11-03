@@ -1,9 +1,9 @@
 package com.seatsure.entity;
 
+import lombok.AccessLevel;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -11,8 +11,7 @@ import java.util.UUID;
 /** What happened to each notification: shown on the admin "Emails" page. Passwords are masked. */
 @Entity
 @Getter
-@Setter
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "notification_log")
 public class NotificationLog {
 
@@ -47,4 +46,18 @@ public class NotificationLog {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+
+    private static final int MAX_PREVIEW = 2000;
+
+    public NotificationLog(UUID messageId, String eventType, String recipient, String subject, String body,
+                           Delivery delivery, String detail, Instant createdAt) {
+        this.messageId = messageId;
+        this.eventType = eventType;
+        this.recipient = recipient;
+        this.subject = subject;
+        this.bodyPreview = body.length() > MAX_PREVIEW ? body.substring(0, MAX_PREVIEW) : body;
+        this.delivery = delivery;
+        this.detail = detail;
+        this.createdAt = createdAt;
+    }
 }

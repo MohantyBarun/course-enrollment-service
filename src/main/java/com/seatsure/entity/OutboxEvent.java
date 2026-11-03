@@ -3,7 +3,6 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -16,7 +15,6 @@ import java.util.UUID;
  */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "outbox_events")
 public class OutboxEvent {

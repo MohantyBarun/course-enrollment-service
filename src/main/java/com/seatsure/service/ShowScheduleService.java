@@ -147,7 +147,7 @@ public class ShowScheduleService {
             throw new BadRequestException("This show has already started");
         }
         Instant now = clock.instant();
-        show.setStatus(ShowStatus.CANCELLED);
+        show.cancel();
         for (SeatHold hold : holds.findActiveForShowForUpdate(showId)) {
             showSeats.lockByHold(hold.getId()).forEach(ShowSeat::release);
             hold.close(SeatHold.Status.RELEASED, now); // a payment still in flight is refunded when it lands

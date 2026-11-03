@@ -108,8 +108,7 @@ public class PaymentService {
 
         if (hold.isLive(now) && show.isBookable(now)) {
             Booking booking = bookings.createFromHold(hold, payment, now);
-            hold.setBooking(booking);
-            hold.close(SeatHold.Status.CONVERTED, now);
+            hold.convertTo(booking, now);
             waitlist.holdEnded(hold, true, now);
             meters.counter("payments.outcome", "result", "confirmed").increment();
             log.info("Payment {} confirmed hold {} as booking {}", gatewayRef, hold.getId(), booking.getReference());

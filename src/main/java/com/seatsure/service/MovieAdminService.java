@@ -45,8 +45,7 @@ public class MovieAdminService {
 
     @Transactional
     public MovieDetail createMovie(MovieRequest request) {
-        Movie movie = new Movie();
-        movie.update(request.title(), request.synopsis(), request.durationMinutes(), request.language(),
+        Movie movie = new Movie(request.title(), request.synopsis(), request.durationMinutes(), request.language(),
                 request.certificate(), request.genres(), request.releaseDate(), request.posterUrl());
         return MovieDetail.of(movies.save(movie));
     }

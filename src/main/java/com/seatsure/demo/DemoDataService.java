@@ -191,14 +191,8 @@ public class DemoDataService {
 
         Map<String, Movie> movieByTitle = new LinkedHashMap<>();
         for (MovieSeed m : MOVIES) {
-            Movie movie = new Movie();
-            movie.setTitle(m.title());
-            movie.setSynopsis(m.synopsis());
-            movie.setLanguage(m.language());
-            movie.setCertificate(m.certificate());
-            movie.setDurationMinutes(m.minutes());
-            movie.setGenres(m.genres());
-            movie.setReleaseDate(today.minusDays(m.releasedDaysAgo()));
+            Movie movie = new Movie(m.title(), m.synopsis(), m.minutes(), m.language(), m.certificate(),
+                    List.of(m.genres().split(",")), today.minusDays(m.releasedDaysAgo()), null);
             movieByTitle.put(m.title(), movies.save(movie));
         }
 

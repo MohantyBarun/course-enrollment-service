@@ -4,7 +4,6 @@ import com.seatsure.service.Roles;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -13,7 +12,6 @@ import java.time.Instant;
 
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @EntityListeners(AuditingEntityListener.class)
 @Table(name = "users")
@@ -60,5 +58,14 @@ public class User {
 
     public static String normalizeEmail(String email) {
         return email == null ? null : email.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** A blank number is stored as none. */
+    public void changePhone(String phone) {
+        this.phone = phone == null || phone.isBlank() ? null : phone.trim();
+    }
+
+    public void changePassword(String passwordHash) {
+        this.password = passwordHash;
     }
 }

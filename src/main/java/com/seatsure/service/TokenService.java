@@ -80,7 +80,7 @@ public class TokenService {
         if (!user.isActive()) {
             throw new AuthenticationFailedException("Account is deactivated.");
         }
-        token.setRevokedAt(now);
+        token.revoke(now);
         return issue(user, token.getFamilyId());
     }
 

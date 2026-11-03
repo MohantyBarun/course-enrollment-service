@@ -82,8 +82,7 @@ public class BookingService {
                 .sorted(Comparator.comparing((ShowSeat ss) -> ss.getSeat().getRowLabel())
                         .thenComparingInt(ss -> ss.getSeat().getSeatNumber()))
                 .forEach(ss -> booking.addSeat(ss.getSeat(), quote.priceOf(ss)));
-        booking.setConvenienceFeePaise(hold.getConvenienceFeePaise());
-        booking.setPayment(payment);
+        booking.paidWith(payment, hold.getConvenienceFeePaise());
         bookings.save(booking);
         seats.forEach(ss -> ss.book(booking));
         seatEvents.seatsChanged(show.getId(), seats);

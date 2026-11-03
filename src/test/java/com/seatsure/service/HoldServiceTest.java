@@ -1,5 +1,6 @@
 package com.seatsure.service;
 
+import com.seatsure.entity.Certificate;
 import com.seatsure.dto.CheckoutDtos.HoldView;
 import com.seatsure.entity.*;
 import com.seatsure.exception.BadRequestException;
@@ -59,10 +60,8 @@ class HoldServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10), transactionManager, new SimpleMeterRegistry());
 
         Screen screen = new Screen(new Cinema(new City("Pune", "Maharashtra"), "Starlight", "Somewhere"), "Audi 1");
-        Movie movie = new Movie();
-        movie.setTitle("Monsoon Protocol");
-        movie.setDurationMinutes(150);
-        movie.setReleaseDate(LocalDate.of(2026, 10, 1));
+        Movie movie = new Movie("Monsoon Protocol", "A heist.", 150, "Hindi", Certificate.UA, List.of("Thriller"),
+                LocalDate.of(2026, 10, 1), null);
         show = new Show(movie, screen, NOW.plus(Duration.ofDays(1)), ShowFormat.TWO_D);
         ReflectionTestUtils.setField(show, "id", 5L);
         User user = new User("Asha", "asha@x.com", "hash", Roles.ROLE_CUSTOMER);
@@ -79,10 +78,11 @@ class HoldServiceTest {
     private ShowSeat showSeat(long seatId, String row, int number, SeatCategory category, ShowSeatStatus status) {
         Seat seat = new Seat(show.getScreen(), row, number, number, category);
         ReflectionTestUtils.setField(seat, "id", seatId);
+        // Inventory rows are created in SQL (one per seat) when a show is scheduled; build one by hand here
         ShowSeat ss = new ShowSeat();
-        ss.setShow(show);
-        ss.setSeat(seat);
-        ss.setStatus(status);
+        ReflectionTestUtils.setField(ss, "show", show);
+        ReflectionTestUtils.setField(ss, "seat", seat);
+        ReflectionTestUtils.setField(ss, "status", status);
         return ss;
     }
 
@@ -137,7 +137,7 @@ class HoldServiceTest {
 
     @Test
     void create_afterTheShowStarts_isRejected() {
-        show.setStartsAt(NOW.minusSeconds(60));
+        ReflectionTestUtils.setField(show, "startsAt", NOW.minusSeconds(60));
 
         assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L)))
                 .isInstanceOf(BadRequestException.class).hasMessageContaining("closed");
@@ -145,7 +145,7 @@ class HoldServiceTest {
 
     @Test
     void create_cancelledShow_isRejected() {
-        show.setStatus(ShowStatus.CANCELLED);
+        show.cancel();
 
         assertThatThrownBy(() -> service.create(7L, 5L, List.of(10L)))
                 .isInstanceOf(BadRequestException.class).hasMessageContaining("cancelled");

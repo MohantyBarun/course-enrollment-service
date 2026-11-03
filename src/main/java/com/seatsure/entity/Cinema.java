@@ -1,15 +1,16 @@
 package com.seatsure.entity;
 
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import org.springframework.data.annotation.CreatedDate;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "cinemas")
 public class Cinema {
@@ -28,8 +29,9 @@ public class Cinema {
     @Column(name = "address", nullable = false, length = 300)
     private String address;
 
+    @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt = Instant.now();
+    private Instant createdAt;
 
     public Cinema(City city, String name, String address) {
         this.city = city;
