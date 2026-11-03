@@ -23,14 +23,22 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 @Slf4j
 @Service
 public class AuthService {
 
-    static final int TEMP_BLOCK_THRESHOLD = 5;       // wrong passwords before a 30-minute block
-    static final int PERMANENT_BLOCK_THRESHOLD = 10; // more than this => blocked until an admin steps in
+    /**
+     * Lockout never becomes permanent: anyone who knows an email address could otherwise lock its
+     * owner out for good. Blocks escalate instead (30 min, 1 h, 2 h, ... up to a day), and failures
+     * older than a day are forgotten. Per-IP rate limits slow guessing further.
+     */
+    static final int BLOCK_THRESHOLD = 5;
+    static final Duration FIRST_BLOCK = Duration.ofMinutes(30);
+    static final Duration MAX_BLOCK = Duration.ofHours(24);
+    static final Duration FAILURE_MEMORY = Duration.ofHours(24);
     static final String INVALID_CREDENTIALS = "Invalid email or password";
 
     private final UserRepository users;
@@ -75,7 +83,8 @@ public class AuthService {
 
     /**
      * noRollbackFor: a failed login records the failure (counters, block status) and then throws;
-     * rolling that back would disable the brute-force protection.
+     * rolling that back would disable the brute-force protection. The counter row is locked, so
+     * parallel guesses are counted one after another instead of overwriting each other.
      */
     @Observed(name = "auth.login", contextualName = "login")
     @Transactional(noRollbackFor = {AuthenticationFailedException.class, AccountLockedException.class})
@@ -85,10 +94,11 @@ public class AuthService {
             passwordEncoder.matches(request.password(), dummyHash);
             throw new AuthenticationFailedException(INVALID_CREDENTIALS);
         }
-        LoginSecurity security = loginSecurity.findById(user.getId())
+        LoginSecurity security = loginSecurity.findByIdForUpdate(user.getId())
                 .orElseGet(() -> loginSecurity.save(new LoginSecurity(user)));
         LocalDateTime now = LocalDateTime.now();
 
+        // Set only by hand (support), never by failed logins
         if (Boolean.TRUE.equals(security.getPermanentBlock())) {
             throw new AccountLockedException("This account is blocked. Please contact support.");
         }
@@ -97,9 +107,11 @@ public class AuthService {
                 throw new AccountLockedException("Too many failed attempts. Try again after "
                         + security.getBlockExpiryAt().withNano(0).toLocalTime() + ".");
             }
-            // The block has expired. The failure count is kept, so repeated guessing still reaches the permanent block.
+            // The block has expired. The count is kept, so the next wrong password blocks for longer.
             security.setAccountStatus(AccountStatus.ACTIVE);
             security.setUnblockedAt(now);
+        } else if (security.getLastFailedAt() != null && security.getLastFailedAt().isBefore(now.minus(FAILURE_MEMORY))) {
+            security.setWrongPasswordCount(0); // an old typo shouldn't count towards a block today
         }
         if (!user.isActive()) {
             throw new AccountLockedException("This account is deactivated. Please contact support.");
@@ -109,21 +121,14 @@ public class AuthService {
             int failures = security.getWrongPasswordCount() + 1;
             security.setWrongPasswordCount(failures);
             security.setLastFailedAt(now);
-            if (failures > PERMANENT_BLOCK_THRESHOLD) {
-                security.setPermanentBlock(true);
-                security.setAccountStatus(AccountStatus.PERMANENTLY_BLOCKED);
-                security.setBlockedAt(now);
-                security.setBlockReason("More than " + PERMANENT_BLOCK_THRESHOLD + " wrong passwords");
-                log.warn("Account {} permanently blocked", user.getId());
-                throw new AccountLockedException("Too many failed attempts. This account is now blocked.");
-            }
-            if (failures >= TEMP_BLOCK_THRESHOLD) {
+            if (failures >= BLOCK_THRESHOLD) {
+                Duration block = blockDuration(failures);
                 security.setAccountStatus(AccountStatus.BLOCKED);
                 security.setBlockedAt(now);
-                security.setBlockExpiryAt(now.plusMinutes(30));
+                security.setBlockExpiryAt(now.plus(block));
                 security.setBlockReason(failures + " wrong passwords");
-                log.warn("Account {} blocked for 30 minutes", user.getId());
-                throw new AccountLockedException("Too many failed attempts. Try again in 30 minutes.");
+                log.warn("Account {} blocked for {} after {} wrong passwords", user.getId(), block, failures);
+                throw new AccountLockedException("Too many failed attempts. Try again in " + describe(block) + ".");
             }
             throw new AuthenticationFailedException(INVALID_CREDENTIALS);
         }
@@ -131,6 +136,18 @@ public class AuthService {
         security.setWrongPasswordCount(0);
         security.setLastLoginAt(now);
         return tokens.issue(user);
+    }
+
+    /** 30 min at the 5th wrong password, doubling with each one after, capped at a day. */
+    static Duration blockDuration(int failures) {
+        int doublings = Math.min(failures - BLOCK_THRESHOLD, 10); // 2^10 x 30 min is already past the cap
+        Duration block = FIRST_BLOCK.multipliedBy(1L << doublings);
+        return block.compareTo(MAX_BLOCK) > 0 ? MAX_BLOCK : block;
+    }
+
+    private static String describe(Duration block) {
+        long hours = block.toHours();
+        return hours >= 1 ? hours + (hours == 1 ? " hour" : " hours") : block.toMinutes() + " minutes";
     }
 
     @Transactional

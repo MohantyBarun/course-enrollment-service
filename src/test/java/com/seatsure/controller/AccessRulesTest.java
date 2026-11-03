@@ -41,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Who may call what: browsing is public, booking is for customers, /admin is for admins. */
 @WebMvcTest({CatalogController.class, BookingController.class, CheckoutController.class, AdminController.class})
-@Import({AppConfig.class, JwtUtil.class})
+@Import({AppConfig.class, JwtUtil.class, com.seatsure.demo.DemoPrivacy.class})
 @TestPropertySource(properties = {JWT_PROPERTIES_SECRET, "jwt.access.expiration=900000"})
 class AccessRulesTest {
 

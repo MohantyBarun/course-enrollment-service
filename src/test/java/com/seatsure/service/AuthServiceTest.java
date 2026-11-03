@@ -24,6 +24,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -54,7 +55,7 @@ class AuthServiceTest {
         security = new LoginSecurity(user);
         when(users.findByEmail("asha@x.com")).thenReturn(Optional.of(user));
         when(users.findById(7L)).thenReturn(Optional.of(user));
-        when(loginSecurity.findById(7L)).thenReturn(Optional.of(security));
+        when(loginSecurity.findByIdForUpdate(7L)).thenReturn(Optional.of(security));
     }
 
     @Test
@@ -98,16 +99,58 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("after a block expires the count is kept, so guessing still ends in a permanent block")
-    void login_afterBlockExpires_countKeepsGrowing() {
+    @DisplayName("after a block expires the count is kept: the next wrong password blocks for twice as long")
+    void login_afterBlockExpires_blocksEscalate() {
         security.setAccountStatus(AccountStatus.BLOCKED);
         security.setBlockExpiryAt(LocalDateTime.now().minusMinutes(1));
-        security.setWrongPasswordCount(10);
+        security.setLastFailedAt(LocalDateTime.now().minusMinutes(31));
+        security.setWrongPasswordCount(5);
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
-                .isInstanceOf(AccountLockedException.class);
-        assertThat(security.getPermanentBlock()).isTrue();
-        assertThat(security.getAccountStatus()).isEqualTo(AccountStatus.PERMANENTLY_BLOCKED);
+                .isInstanceOf(AccountLockedException.class).hasMessageContaining("1 hour");
+        assertThat(security.getWrongPasswordCount()).isEqualTo(6);
+        assertThat(security.getBlockExpiryAt()).isAfter(LocalDateTime.now().plusMinutes(59));
+    }
+
+    @Test
+    @DisplayName("failed logins never block an account for good, so nobody can lock its owner out permanently")
+    void login_manyWrongPasswords_neverBlockPermanently() {
+        security.setWrongPasswordCount(40);
+
+        assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
+                .isInstanceOf(AccountLockedException.class).hasMessageContaining("24 hours");
+        assertThat(security.getPermanentBlock()).isFalse();
+        assertThat(security.getAccountStatus()).isEqualTo(AccountStatus.BLOCKED);
+        assertThat(security.getBlockExpiryAt()).isBefore(LocalDateTime.now().plusHours(24).plusMinutes(1));
+    }
+
+    @Test
+    void login_failuresOlderThanADay_areForgotten() {
+        security.setWrongPasswordCount(4);
+        security.setLastFailedAt(LocalDateTime.now().minusDays(2));
+
+        assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
+                .isInstanceOf(AuthenticationFailedException.class);
+        assertThat(security.getWrongPasswordCount()).isEqualTo(1);
+        assertThat(security.getAccountStatus()).isEqualTo(AccountStatus.ACTIVE);
+    }
+
+    @Test
+    void login_permanentBlockSetBySupport_isStillHonoured() {
+        security.setPermanentBlock(true);
+
+        assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "Right#123")))
+                .isInstanceOf(AccountLockedException.class).hasMessageContaining("contact support");
+        verify(tokens, never()).issue(any());
+    }
+
+    @Test
+    void blockDuration_doublesFromHalfAnHourUpToADay() {
+        assertThat(AuthService.blockDuration(5)).isEqualTo(Duration.ofMinutes(30));
+        assertThat(AuthService.blockDuration(6)).isEqualTo(Duration.ofHours(1));
+        assertThat(AuthService.blockDuration(9)).isEqualTo(Duration.ofHours(8));
+        assertThat(AuthService.blockDuration(11)).isEqualTo(Duration.ofHours(24));
+        assertThat(AuthService.blockDuration(1_000)).isEqualTo(Duration.ofHours(24));
     }
 
     @Test

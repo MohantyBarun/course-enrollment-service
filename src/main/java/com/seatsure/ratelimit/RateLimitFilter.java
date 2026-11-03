@@ -30,11 +30,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private final RateLimiter rateLimiter;
+    private final ClientIpResolver clientIp;
     private final List<Rule> rules;
     private final MeterRegistry meterRegistry;
 
-    public RateLimitFilter(RateLimiter rateLimiter, RateLimitProperties limits, MeterRegistry meterRegistry) {
+    public RateLimitFilter(RateLimiter rateLimiter, ClientIpResolver clientIp, RateLimitProperties limits,
+                           MeterRegistry meterRegistry) {
         this.rateLimiter = rateLimiter;
+        this.clientIp = clientIp;
         this.meterRegistry = meterRegistry;
         this.rules = List.of(
                 new Rule("login", post("/auth/login"), limits.loginPerMinute()),
@@ -65,9 +68,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         Rule rule = rules.stream().filter(r -> r.matches().test(request)).findFirst().orElseThrow();
-        // With server.forward-headers-strategy=framework (prod), this is the client address from
-        // X-Forwarded-For as set by the hosting proxy, not the proxy's own address.
-        String client = request.getRemoteAddr();
+        // Counted back from the right of X-Forwarded-For: a client can't pick its own bucket
+        String client = clientIp.resolve(request);
         RateLimiter.Decision decision = rateLimiter.tryAcquire(rule.name() + ":" + client, rule.limitPerMinute(), WINDOW);
 
         response.setHeader("X-RateLimit-Limit", String.valueOf(decision.limit()));

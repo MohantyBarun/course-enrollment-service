@@ -38,7 +38,7 @@ public class AuthController {
 
     @Operation(summary = "Log in",
             description = "Returns an access token (15 min) and a refresh token (7 days). "
-                    + "5 wrong passwords block the account for 30 minutes; more than 10 block it permanently.")
+                    + "5 wrong passwords block the account for 30 minutes; each further one doubles the block, up to a day.")
     @SecurityRequirements
     @PostMapping("/login")
     public TokenResponse login(@Valid @RequestBody LoginRequest request) {

@@ -205,7 +205,7 @@ public class DemoDataService {
         List<Long> customerIds = new ArrayList<>();
         customerIds.add(ensureAccount("Demo Customer", demoCustomerEmail, Roles.ROLE_CUSTOMER).getId());
         for (String name : CUSTOMER_NAMES) {
-            String email = name.toLowerCase(Locale.ROOT).replace(' ', '.') + "@seatsure.dev";
+            String email = name.toLowerCase(Locale.ROOT).replace(' ', '.') + DemoPrivacy.SEEDED_DOMAIN;
             customerIds.add(ensureAccount(name, email, Roles.ROLE_CUSTOMER).getId());
         }
 
