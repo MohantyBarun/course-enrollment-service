@@ -1,5 +1,6 @@
 package com.seatsure.idempotency;
 
+import java.time.Clock;
 import com.seatsure.entity.IdempotencyRecord;
 import com.seatsure.repository.IdempotencyRecordRepository;
 import com.seatsure.util.SecretBox;
@@ -12,7 +13,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -35,14 +36,16 @@ public class IdempotencyService {
     private final SecretBox secretBox;
     private final TransactionTemplate tx;
     private final Duration ttl;
+    private final Clock clock;
 
     public IdempotencyService(IdempotencyRecordRepository repository, SecretBox secretBox,
                               PlatformTransactionManager transactionManager,
-                              @Value("${app.idempotency.ttl:PT24H}") Duration ttl) {
+                              @Value("${app.idempotency.ttl:PT24H}") Duration ttl, Clock clock) {
         this.repository = repository;
         this.secretBox = secretBox;
         this.tx = new TransactionTemplate(transactionManager);
         this.ttl = ttl;
+        this.clock = clock;
     }
 
     public Claim claim(String owner, String key, String requestHash) {
@@ -55,7 +58,7 @@ public class IdempotencyService {
     }
 
     private Claim claimInTransaction(String owner, String key, String requestHash) {
-        LocalDateTime now = LocalDateTime.now();
+        Instant now = clock.instant();
         Optional<IdempotencyRecord> existing = repository.findByOwnerAndIdempotencyKey(owner, key);
         if (existing.isPresent()) {
             IdempotencyRecord record = existing.get();
@@ -100,7 +103,7 @@ public class IdempotencyService {
 
     @Scheduled(cron = "0 25 3 * * *", zone = "Asia/Kolkata")
     public void purgeExpired() {
-        Integer deleted = tx.execute(s -> repository.deleteExpired(LocalDateTime.now()));
+        Integer deleted = tx.execute(s -> repository.deleteExpired(clock.instant()));
         log.info("Purged {} expired idempotency keys", deleted);
     }
 }

@@ -1,5 +1,6 @@
 package com.seatsure.service;
 
+import java.time.Clock;
 import com.seatsure.dto.AuthDtos.TokenResponse;
 import com.seatsure.dto.AuthDtos.UserView;
 import com.seatsure.entity.RefreshToken;
@@ -19,7 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -41,12 +42,14 @@ public class TokenService {
     private final RefreshTokenRepository refreshTokens;
     private final JwtUtil jwtUtil;
     private final Duration refreshTtl;
+    private final Clock clock;
 
     public TokenService(RefreshTokenRepository refreshTokens, JwtUtil jwtUtil,
-                        @Value("${app.auth.refresh-ttl:P7D}") Duration refreshTtl) {
+                        @Value("${app.auth.refresh-ttl:P7D}") Duration refreshTtl, Clock clock) {
         this.refreshTokens = refreshTokens;
         this.jwtUtil = jwtUtil;
         this.refreshTtl = refreshTtl;
+        this.clock = clock;
     }
 
     /** A new session (login, registration, demo login): a new token family. */
@@ -61,7 +64,7 @@ public class TokenService {
      */
     @Transactional(noRollbackFor = AuthenticationFailedException.class)
     public TokenResponse rotate(String presentedToken) {
-        LocalDateTime now = LocalDateTime.now();
+        Instant now = clock.instant();
         RefreshToken token = refreshTokens.findByTokenHashForUpdate(hash(presentedToken))
                 .orElseThrow(() -> new AuthenticationFailedException("Invalid refresh token. Please log in again."));
         if (token.isRevoked()) {
@@ -85,19 +88,19 @@ public class TokenService {
     @Transactional
     public void revokeSession(String presentedToken) {
         refreshTokens.findByTokenHashForUpdate(hash(presentedToken))
-                .ifPresent(t -> refreshTokens.revokeFamily(t.getFamilyId(), LocalDateTime.now()));
+                .ifPresent(t -> refreshTokens.revokeFamily(t.getFamilyId(), clock.instant()));
     }
 
     /** After a password change: sign out everywhere. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void revokeAll(Long userId) {
-        refreshTokens.revokeAllForUser(userId, LocalDateTime.now());
+        refreshTokens.revokeAllForUser(userId, clock.instant());
     }
 
     @Transactional
     @Scheduled(cron = "0 40 3 * * *", zone = "Asia/Kolkata")
     public void purgeExpired() {
-        int deleted = refreshTokens.deleteExpiredBefore(LocalDateTime.now().minusDays(1));
+        int deleted = refreshTokens.deleteExpiredBefore(clock.instant().minus(Duration.ofDays(1)));
         log.info("Purged {} expired refresh tokens", deleted);
     }
 
@@ -105,7 +108,7 @@ public class TokenService {
         byte[] bytes = new byte[32];
         RANDOM.nextBytes(bytes);
         String refresh = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        LocalDateTime now = LocalDateTime.now();
+        Instant now = clock.instant();
         refreshTokens.save(new RefreshToken(user, hash(refresh), family, now, now.plus(refreshTtl)));
         String access = jwtUtil.generateAccessToken(user.getId(), user.getEmail(), user.getRole());
         return new TokenResponse(access, refresh, "Bearer", jwtUtil.accessExpirationSeconds(), UserView.of(user));

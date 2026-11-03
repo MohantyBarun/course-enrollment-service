@@ -6,7 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -48,19 +48,19 @@ public class OutboxEvent {
     private int attempts;
 
     @Column(name = "next_attempt_at", nullable = false)
-    private LocalDateTime nextAttemptAt;
+    private Instant nextAttemptAt;
 
     @Column(name = "last_error", length = 1000)
     private String lastError;
 
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @Column(name = "published_at")
-    private LocalDateTime publishedAt;
+    private Instant publishedAt;
 
     public static OutboxEvent pending(String aggregateType, String aggregateId, String eventType, String payload,
-                                      LocalDateTime now) {
+                                      Instant now) {
         OutboxEvent e = new OutboxEvent();
         e.id = UUID.randomUUID();
         e.aggregateType = aggregateType;
@@ -72,14 +72,14 @@ public class OutboxEvent {
         return e;
     }
 
-    public void markPublished(LocalDateTime now) {
+    public void markPublished(Instant now) {
         status = Status.PUBLISHED;
         publishedAt = now;
         lastError = null;
     }
 
     /** Schedules a retry with exponential backoff (5s, 10s, 20s ... capped at 1h), or gives up. */
-    public void markFailed(String error, LocalDateTime now, int maxAttempts) {
+    public void markFailed(String error, Instant now, int maxAttempts) {
         attempts++;
         lastError = error == null ? null : error.substring(0, Math.min(error.length(), 1000));
         if (attempts >= maxAttempts) {

@@ -1,5 +1,6 @@
 package com.seatsure.notification;
 
+import java.time.Clock;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seatsure.entity.NotificationLog;
@@ -16,7 +17,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
@@ -35,16 +35,18 @@ public class NotificationDispatcher {
     private final NotificationLogRepository notificationLog;
     private final String appUrl;
     private final ZoneId zone;
+    private final Clock clock;
 
     public NotificationDispatcher(ProcessedMessages processedMessages, EmailSender emailSender,
                                   ObjectMapper objectMapper, NotificationLogRepository notificationLog,
-                                  @Value("${app.mail.app-url:}") String appUrl, ZoneId audienceZone) {
+                                  @Value("${app.mail.app-url:}") String appUrl, ZoneId audienceZone, Clock clock) {
         this.processedMessages = processedMessages;
         this.emailSender = emailSender;
         this.objectMapper = objectMapper;
         this.notificationLog = notificationLog;
         this.appUrl = appUrl;
         this.zone = audienceZone;
+        this.clock = clock;
     }
 
     /**
@@ -86,7 +88,7 @@ public class NotificationDispatcher {
         entry.setBodyPreview(body.length() > 2000 ? body.substring(0, 2000) : body);
         entry.setDelivery(delivery.sent() ? NotificationLog.Delivery.SENT : NotificationLog.Delivery.SKIPPED);
         entry.setDetail(delivery.detail());
-        entry.setCreatedAt(LocalDateTime.now());
+        entry.setCreatedAt(clock.instant());
         notificationLog.save(entry);
     }
 

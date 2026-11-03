@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,7 +18,7 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
      */
     @Query(value = "SELECT * FROM outbox_events WHERE status = 'PENDING' AND next_attempt_at <= :now "
             + "ORDER BY created_at LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<OutboxEvent> lockNextBatch(@Param("now") LocalDateTime now, @Param("limit") int limit);
+    List<OutboxEvent> lockNextBatch(@Param("now") Instant now, @Param("limit") int limit);
 
     long countByStatus(OutboxEvent.Status status);
 
@@ -30,5 +30,5 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, UUID> 
     @Modifying
     @Query("DELETE FROM OutboxEvent e WHERE e.status = :status AND e.publishedAt < :before")
     int deleteByStatusAndPublishedAtBefore(@Param("status") OutboxEvent.Status status,
-                                           @Param("before") LocalDateTime before);
+                                           @Param("before") Instant before);
 }

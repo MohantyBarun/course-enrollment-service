@@ -1,5 +1,7 @@
 package com.seatsure.outbox;
 
+import java.time.Clock;
+import java.time.Instant;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.repository.OutboxEventRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -12,7 +14,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -33,11 +34,11 @@ class OutboxRelayTest {
     @BeforeEach
     void setUp() {
         lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        relay = new OutboxRelay(repository, transport, transactionManager, meters, 2, 3, Duration.ofDays(7));
+        relay = new OutboxRelay(repository, transport, transactionManager, meters, 2, 3, Duration.ofDays(7), Clock.systemUTC());
     }
 
     private static OutboxEvent event() {
-        return OutboxEvent.pending("User", "1", OutboxEvents.USER_REGISTERED, "{}", LocalDateTime.now());
+        return OutboxEvent.pending("User", "1", OutboxEvents.USER_REGISTERED, "{}", Instant.now());
     }
 
     private double relayed(String outcome) {
@@ -68,7 +69,7 @@ class OutboxRelayTest {
         assertThat(e.getStatus()).isEqualTo(OutboxEvent.Status.PENDING);
         assertThat(e.getAttempts()).isEqualTo(1);
         assertThat(e.getLastError()).contains("broker down");
-        assertThat(e.getNextAttemptAt()).isAfter(LocalDateTime.now().plusSeconds(3));
+        assertThat(e.getNextAttemptAt()).isAfter(Instant.now().plus(Duration.ofSeconds(3)));
         assertThat(relayed("retry")).isEqualTo(1);
     }
 
@@ -112,7 +113,7 @@ class OutboxRelayTest {
     @Test
     void backoff_growsExponentiallyAndIsCapped() {
         OutboxEvent e = event();
-        LocalDateTime now = LocalDateTime.now();
+        Instant now = Instant.now();
         List<Long> delays = IntStream.range(0, 12).mapToObj(i -> {
             e.markFailed("x", now, 100);
             return Duration.between(now, e.getNextAttemptAt()).toSeconds();

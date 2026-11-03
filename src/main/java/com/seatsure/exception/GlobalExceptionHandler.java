@@ -16,7 +16,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -31,7 +31,7 @@ public class GlobalExceptionHandler {
                 .forEach(error -> fieldErrors.put(error.getField(), error.getDefaultMessage()));
 
         Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
+        response.put("timestamp", Instant.now());
         response.put("status", HttpStatus.BAD_REQUEST.value());
         response.put("errors", fieldErrors);
 
@@ -137,7 +137,7 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {
         Map<String, Object> response = new HashMap<>();
-        response.put("timestamp", LocalDateTime.now());
+        response.put("timestamp", Instant.now());
         response.put("status", status.value());
         response.put("error", message);
         return ResponseEntity.status(status).body(response);

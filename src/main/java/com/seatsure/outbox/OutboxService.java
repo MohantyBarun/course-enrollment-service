@@ -1,5 +1,6 @@
 package com.seatsure.outbox;
 
+import java.time.Clock;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seatsure.entity.OutboxEvent;
@@ -10,7 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /** Records domain events in the outbox as part of the caller's transaction. */
 @Service
@@ -20,6 +21,7 @@ public class OutboxService {
     private final OutboxEventRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher applicationEvents;
+    private final Clock clock;
 
     /**
      * MANDATORY: an outbox write outside a business transaction would defeat the pattern
@@ -34,7 +36,7 @@ public class OutboxService {
             throw new IllegalStateException("Could not serialize " + eventType + " event", e);
         }
         OutboxEvent event = outboxRepository.save(
-                OutboxEvent.pending(aggregateType, String.valueOf(aggregateId), eventType, json, LocalDateTime.now()));
+                OutboxEvent.pending(aggregateType, String.valueOf(aggregateId), eventType, json, clock.instant()));
         // Picked up by OutboxRelay after commit, so delivery doesn't wait for the next poll
         applicationEvents.publishEvent(new OutboxEventRecorded(event.getId()));
     }

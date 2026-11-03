@@ -6,7 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Entity
 @Getter
@@ -29,19 +29,19 @@ public class LoginSecurity {
     private Boolean permanentBlock = false;
 
     @Column(name = "last_login_at")
-    private LocalDateTime lastLoginAt;
+    private Instant lastLoginAt;
 
     @Column(name = "last_failed_at")
-    private LocalDateTime lastFailedAt;
+    private Instant lastFailedAt;
 
     @Column(name = "blocked_at")
-    private LocalDateTime blockedAt;
+    private Instant blockedAt;
 
     @Column(name = "unblocked_at")
-    private LocalDateTime unblockedAt;
+    private Instant unblockedAt;
 
     @Column(name = "block_expiry_at")
-    private LocalDateTime blockExpiryAt;
+    private Instant blockExpiryAt;
 
     @Column(name = "block_reason")
     private String blockReason;

@@ -1,5 +1,7 @@
 package com.seatsure.insights;
 
+import java.time.Duration;
+import java.time.Clock;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seatsure.entity.NotificationLog;
@@ -16,8 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,6 +44,7 @@ public class NotificationFeedService {
     }
 
     private final OutboxEventRepository outboxRepository;
+    private final Clock clock;
     private final NotificationLogRepository notificationLog;
     private final ObjectMapper objectMapper;
     private final EmailSender emailSender;
@@ -51,8 +52,10 @@ public class NotificationFeedService {
 
     public NotificationFeedService(OutboxEventRepository outboxRepository, NotificationLogRepository notificationLog,
                                    ObjectMapper objectMapper, EmailSender emailSender,
-                                   @Value("${app.messaging.rabbit.enabled:false}") boolean rabbitEnabled) {
+                                   @Value("${app.messaging.rabbit.enabled:false}") boolean rabbitEnabled,
+                                   Clock clock) {
         this.outboxRepository = outboxRepository;
+        this.clock = clock;
         this.notificationLog = notificationLog;
         this.objectMapper = objectMapper;
         this.emailSender = emailSender;
@@ -75,7 +78,7 @@ public class NotificationFeedService {
         if (log != null) {
             return new Entry(event.getId(), event.getEventType(), label, log.getRecipient(), log.getSubject(),
                     log.getBodyPreview(), log.getDelivery() == NotificationLog.Delivery.SENT ? Status.SENT : Status.LOGGED,
-                    log.getDetail(), event.getAttempts(), instant(event.getCreatedAt()), instant(log.getCreatedAt()), null);
+                    log.getDetail(), event.getAttempts(), event.getCreatedAt(), log.getCreatedAt(), null);
         }
         Status status;
         String detail;
@@ -102,13 +105,8 @@ public class NotificationFeedService {
             }
         }
         return new Entry(event.getId(), event.getEventType(), label, recipientOf(event), label, null, status, detail,
-                event.getAttempts(), instant(event.getCreatedAt()), instant(event.getPublishedAt()),
-                status == Status.RETRYING ? instant(event.getNextAttemptAt()) : null);
-    }
-
-    /** Stored timestamps are server-local; send instants so browsers in any time zone show the right time. */
-    private static Instant instant(LocalDateTime time) {
-        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant();
+                event.getAttempts(), event.getCreatedAt(), event.getPublishedAt(),
+                status == Status.RETRYING ? event.getNextAttemptAt() : null);
     }
 
     private String recipientOf(OutboxEvent event) {
@@ -135,7 +133,7 @@ public class NotificationFeedService {
     @Transactional
     @Scheduled(cron = "0 30 3 * * *", zone = "Asia/Kolkata")
     public void purgeOld() {
-        int deleted = notificationLog.deleteCreatedBefore(LocalDateTime.now().minusDays(30));
+        int deleted = notificationLog.deleteCreatedBefore(clock.instant().minus(Duration.ofDays(30)));
         log.info("Purged {} notification log rows older than 30 days", deleted);
     }
 }
