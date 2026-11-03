@@ -1,5 +1,9 @@
 package com.seatsure.service;
 
+import java.util.Locale;
+import java.time.format.DateTimeFormatter;
+import java.time.ZoneId;
+import java.time.Clock;
 import com.seatsure.dto.AuthDtos.ChangePasswordRequest;
 import com.seatsure.dto.AuthDtos.LoginRequest;
 import com.seatsure.dto.AuthDtos.RegisterRequest;
@@ -24,7 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Slf4j
 @Service
@@ -39,6 +43,7 @@ public class AuthService {
     static final Duration FIRST_BLOCK = Duration.ofMinutes(30);
     static final Duration MAX_BLOCK = Duration.ofHours(24);
     static final Duration FAILURE_MEMORY = Duration.ofHours(24);
+    private static final DateTimeFormatter UNTIL = DateTimeFormatter.ofPattern("d MMM, h:mm a z", Locale.ENGLISH);
     static final String INVALID_CREDENTIALS = "Invalid email or password";
 
     private final UserRepository users;
@@ -46,16 +51,20 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokens;
     private final OutboxService outbox;
+    private final Clock clock;
+    private final ZoneId zone;
     /** Compared against when the email is unknown, so both cases take a BCrypt check (no timing oracle). */
     private final String dummyHash;
 
     public AuthService(UserRepository users, LoginSecurityRepository loginSecurity, PasswordEncoder passwordEncoder,
-                       TokenService tokens, OutboxService outbox) {
+                       TokenService tokens, OutboxService outbox, Clock clock, ZoneId zone) {
         this.users = users;
         this.loginSecurity = loginSecurity;
         this.passwordEncoder = passwordEncoder;
         this.tokens = tokens;
         this.outbox = outbox;
+        this.clock = clock;
+        this.zone = zone;
         this.dummyHash = passwordEncoder.encode("not-a-real-password");
     }
 
@@ -96,7 +105,7 @@ public class AuthService {
         }
         LoginSecurity security = loginSecurity.findByIdForUpdate(user.getId())
                 .orElseGet(() -> loginSecurity.save(new LoginSecurity(user)));
-        LocalDateTime now = LocalDateTime.now();
+        Instant now = clock.instant();
 
         // Set only by hand (support), never by failed logins
         if (Boolean.TRUE.equals(security.getPermanentBlock())) {
@@ -105,7 +114,7 @@ public class AuthService {
         if (security.getAccountStatus() == AccountStatus.BLOCKED) {
             if (now.isBefore(security.getBlockExpiryAt())) {
                 throw new AccountLockedException("Too many failed attempts. Try again after "
-                        + security.getBlockExpiryAt().withNano(0).toLocalTime() + ".");
+                        + UNTIL.format(security.getBlockExpiryAt().atZone(zone)) + ".");
             }
             // The block has expired. The count is kept, so the next wrong password blocks for longer.
             security.setAccountStatus(AccountStatus.ACTIVE);

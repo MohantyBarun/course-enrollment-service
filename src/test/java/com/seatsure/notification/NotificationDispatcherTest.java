@@ -1,5 +1,6 @@
 package com.seatsure.notification;
 
+import java.time.Clock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -43,7 +44,7 @@ class NotificationDispatcherTest {
     @BeforeEach
     void setUp() {
         dispatcher = new NotificationDispatcher(processedMessages, emailSender, objectMapper, notificationLog,
-                "https://seatsure.example.com/", ZoneId.of("Asia/Kolkata"));
+                "https://seatsure.example.com/", ZoneId.of("Asia/Kolkata"), Clock.systemUTC());
     }
 
     private OutboxEvents.Message message(String type, Object payload) throws Exception {

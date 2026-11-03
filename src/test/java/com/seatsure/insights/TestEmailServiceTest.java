@@ -1,5 +1,7 @@
 package com.seatsure.insights;
 
+import java.time.Clock;
+import java.time.Instant;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.ConflictException;
@@ -12,7 +14,6 @@ import com.seatsure.repository.OutboxEventRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,7 +29,7 @@ class TestEmailServiceTest {
 
     private TestEmailService service(EmailSender sender) {
         when(repository.findFirstByEventTypeOrderByCreatedAtDesc(OutboxEvents.TEST_EMAIL)).thenReturn(Optional.empty());
-        return new TestEmailService(outbox, repository, sender, Duration.ofMinutes(5));
+        return new TestEmailService(outbox, repository, sender, Duration.ofMinutes(5), Clock.systemUTC());
     }
 
     private static EmailSender allowlist(String entries) {
@@ -68,7 +69,7 @@ class TestEmailServiceTest {
     void isLimitedToOnePerCooldown() {
         TestEmailService service = service(allowlist("owner@gmail.com"));
         OutboxEvent recent = OutboxEvent.pending("Notification", "test", OutboxEvents.TEST_EMAIL, "{}",
-                LocalDateTime.now().minusSeconds(30));
+                Instant.now().minus(Duration.ofSeconds(30)));
         when(repository.findFirstByEventTypeOrderByCreatedAtDesc(OutboxEvents.TEST_EMAIL)).thenReturn(Optional.of(recent));
 
         assertThatThrownBy(() -> service.queue(null, "admin"))

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -42,6 +43,7 @@ class LiveSeatMapIntegrationTest {
     @Autowired private AdminCatalogService admin;
     @Autowired private TestFixtures fixtures;
     @Autowired private SeatChangeListener listener;
+    @Autowired private JdbcTemplate jdbc;
 
     /** Collects "event:"/"data:" lines from the stream on a background thread. */
     private BlockingQueue<String> open(Long showId) throws Exception {
@@ -100,5 +102,22 @@ class LiveSeatMapIntegrationTest {
         admin.cancelShow(show.showId(), "Projector failure");
 
         assertThat(stream.poll(10, TimeUnit.SECONDS)).isEqualTo("event:reload");
+    }
+
+    @Test
+    @DisplayName("when the LISTEN connection drops, open seat maps are told to reload once it's back")
+    void listenerReconnect_triggersReload() throws Exception {
+        ShowFixture show = fixtures.show(1, 4);
+        BlockingQueue<String> stream = open(show.showId());
+
+        // What a database failover or idle-connection reaper does to the listener's connection
+        int killed = jdbc.queryForObject("""
+                SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity
+                WHERE query ILIKE 'LISTEN %' AND pid <> pg_backend_pid()
+                """, Integer.class);
+        assertThat(killed).isEqualTo(1);
+
+        assertThat(stream.poll(20, TimeUnit.SECONDS)).isEqualTo("event:reload");
+        await().atMost(Duration.ofSeconds(15)).until(listener::isListening);
     }
 }

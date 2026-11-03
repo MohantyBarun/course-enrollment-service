@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,13 +24,13 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     @Modifying
     @Query("UPDATE RefreshToken rt SET rt.revokedAt = :now WHERE rt.familyId = :family AND rt.revokedAt IS NULL")
-    int revokeFamily(@Param("family") UUID family, @Param("now") LocalDateTime now);
+    int revokeFamily(@Param("family") UUID family, @Param("now") Instant now);
 
     @Modifying
     @Query("UPDATE RefreshToken rt SET rt.revokedAt = :now WHERE rt.user.id = :userId AND rt.revokedAt IS NULL")
-    int revokeAllForUser(@Param("userId") Long userId, @Param("now") LocalDateTime now);
+    int revokeAllForUser(@Param("userId") Long userId, @Param("now") Instant now);
 
     @Modifying
     @Query("DELETE FROM RefreshToken rt WHERE rt.expiresAt < :before")
-    int deleteExpiredBefore(@Param("before") LocalDateTime before);
+    int deleteExpiredBefore(@Param("before") Instant before);
 }

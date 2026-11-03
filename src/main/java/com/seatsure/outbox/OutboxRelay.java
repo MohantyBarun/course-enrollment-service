@@ -1,5 +1,6 @@
 package com.seatsure.outbox;
 
+import java.time.Clock;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.repository.OutboxEventRepository;
 import io.micrometer.core.instrument.Counter;
@@ -16,7 +17,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -33,9 +34,11 @@ public class OutboxRelay {
     private final int batchSize;
     private final int maxAttempts;
     private final Duration retention;
+    private final Duration claimLease;
     private final Counter published;
     private final Counter retried;
     private final Counter deadLettered;
+    private final Clock clock;
 
     public OutboxRelay(OutboxEventRepository outboxRepository,
                        OutboxTransport transport,
@@ -43,13 +46,17 @@ public class OutboxRelay {
                        MeterRegistry meterRegistry,
                        @Value("${app.outbox.batch-size:50}") int batchSize,
                        @Value("${app.outbox.max-attempts:10}") int maxAttempts,
-                       @Value("${app.outbox.retention:P7D}") Duration retention) {
+                       @Value("${app.outbox.retention:P7D}") Duration retention,
+                       @Value("${app.outbox.claim-lease:PT5M}") Duration claimLease,
+                       Clock clock) {
         this.outboxRepository = outboxRepository;
         this.transport = transport;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.batchSize = batchSize;
         this.maxAttempts = maxAttempts;
         this.retention = retention;
+        this.claimLease = claimLease;
+        this.clock = clock;
         this.published = Counter.builder("outbox.events.relayed").tag("outcome", "published").register(meterRegistry);
         this.retried = Counter.builder("outbox.events.relayed").tag("outcome", "retry").register(meterRegistry);
         this.deadLettered = Counter.builder("outbox.events.relayed").tag("outcome", "failed").register(meterRegistry);
@@ -75,41 +82,69 @@ public class OutboxRelay {
         int total = 0;
         int attempted;
         do {
-            Integer n = transactionTemplate.execute(status -> relayBatch());
-            attempted = n == null ? 0 : n;
+            attempted = relayBatch();
             total += attempted;
         } while (attempted == batchSize);
         return total;
     }
 
+    /**
+     * Claim, then send, then record. No transaction or row lock is held while sending: a slow SMTP
+     * server or broker would otherwise keep a pooled connection (and the claimed rows) busy for the
+     * whole batch. The lease set at claim time keeps other relays off these events meanwhile.
+     */
     private int relayBatch() {
-        List<OutboxEvent> batch = outboxRepository.lockNextBatch(LocalDateTime.now(), batchSize);
-        for (OutboxEvent event : batch) {
-            try {
-                transport.send(new OutboxEvents.Message(event.getId(), event.getEventType(), event.getPayload()));
-                event.markPublished(LocalDateTime.now());
-                published.increment();
-            } catch (Exception e) {
-                event.markFailed(e.toString(), LocalDateTime.now(), maxAttempts);
-                if (event.getStatus() == OutboxEvent.Status.FAILED) {
-                    deadLettered.increment();
-                    log.error("Outbox event {} ({}) failed permanently after {} attempts: {}",
-                            event.getId(), event.getEventType(), event.getAttempts(), e.toString());
-                } else {
-                    retried.increment();
-                    log.warn("Outbox event {} ({}) failed, attempt {}; retrying at {}: {}",
-                            event.getId(), event.getEventType(), event.getAttempts(), event.getNextAttemptAt(),
-                            e.toString());
-                }
-            }
+        List<OutboxEvents.Message> claimed = transactionTemplate.execute(status -> {
+            Instant now = clock.instant();
+            List<OutboxEvent> batch = outboxRepository.lockNextBatch(now, batchSize);
+            batch.forEach(event -> event.lease(now.plus(claimLease)));
+            return batch.stream()
+                    .map(event -> new OutboxEvents.Message(event.getId(), event.getEventType(), event.getPayload()))
+                    .toList();
+        });
+        if (claimed == null) {
+            return 0;
         }
-        return batch.size();
+        for (OutboxEvents.Message message : claimed) {
+            Exception failure = null;
+            try {
+                transport.send(message);
+            } catch (Exception e) {
+                failure = e;
+            }
+            Exception outcome = failure;
+            transactionTemplate.executeWithoutResult(status ->
+                    outboxRepository.findById(message.id()).ifPresent(event -> record(event, outcome)));
+        }
+        return claimed.size();
+    }
+
+    private void record(OutboxEvent event, Exception failure) {
+        if (event.getStatus() != OutboxEvent.Status.PENDING) {
+            return; // another relay re-claimed it after our lease ran out and already finished it
+        }
+        if (failure == null) {
+            event.markPublished(clock.instant());
+            published.increment();
+            return;
+        }
+        event.markFailed(failure.toString(), clock.instant(), maxAttempts);
+        if (event.getStatus() == OutboxEvent.Status.FAILED) {
+            deadLettered.increment();
+            log.error("Outbox event {} ({}) failed permanently after {} attempts: {}",
+                    event.getId(), event.getEventType(), event.getAttempts(), failure.toString());
+        } else {
+            retried.increment();
+            log.warn("Outbox event {} ({}) failed, attempt {}; retrying at {}: {}",
+                    event.getId(), event.getEventType(), event.getAttempts(), event.getNextAttemptAt(),
+                    failure.toString());
+        }
     }
 
     @Scheduled(cron = "0 15 3 * * *", zone = "Asia/Kolkata")
     public void purgePublished() {
         Integer deleted = transactionTemplate.execute(status -> outboxRepository.deleteByStatusAndPublishedAtBefore(
-                OutboxEvent.Status.PUBLISHED, LocalDateTime.now().minus(retention)));
+                OutboxEvent.Status.PUBLISHED, clock.instant().minus(retention)));
         log.info("Purged {} published outbox events older than {}", deleted, retention);
     }
 }

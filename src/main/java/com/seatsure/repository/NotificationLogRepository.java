@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -17,5 +17,5 @@ public interface NotificationLogRepository extends JpaRepository<NotificationLog
 
     @Modifying
     @Query("DELETE FROM NotificationLog n WHERE n.createdAt < :before")
-    int deleteCreatedBefore(@Param("before") LocalDateTime before);
+    int deleteCreatedBefore(@Param("before") Instant before);
 }

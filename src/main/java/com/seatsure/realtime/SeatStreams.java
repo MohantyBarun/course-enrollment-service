@@ -79,6 +79,22 @@ public class SeatStreams {
         }
     }
 
+    /**
+     * Tells every open seat map to refetch. Used after the LISTEN connection comes back: changes
+     * committed while it was down were never delivered, so the maps can't be patched, only reloaded.
+     */
+    public int reloadAll() {
+        int[] sent = {0};
+        byShow.forEach((showId, watchers) -> {
+            SseEmitter.SseEventBuilder event = SseEmitter.event().name("reload").data(Map.of("showId", showId));
+            watchers.forEach(emitter -> {
+                send(emitter, event, () -> watchers.remove(emitter));
+                sent[0]++;
+            });
+        });
+        return sent[0];
+    }
+
     /** A comment line every 20 seconds, so proxies don't close streams that are quiet. */
     @Scheduled(fixedDelay = 20_000)
     void heartbeat() {

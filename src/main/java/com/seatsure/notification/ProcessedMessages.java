@@ -6,8 +6,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
-import java.time.LocalDateTime;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /** Message ids already handled, so redelivered messages (at-least-once delivery) are ignored. */
@@ -16,6 +17,7 @@ import java.util.UUID;
 public class ProcessedMessages {
 
     private final JdbcTemplate jdbcTemplate;
+    private final Clock clock;
 
     /**
      * Records the id in the caller's transaction; false if it was already recorded. A concurrent
@@ -24,7 +26,7 @@ public class ProcessedMessages {
     public boolean markProcessed(UUID messageId) {
         int inserted = jdbcTemplate.update(
                 "INSERT INTO processed_messages (message_id, processed_at) VALUES (?, ?) ON CONFLICT (message_id) DO NOTHING",
-                messageId, Timestamp.valueOf(LocalDateTime.now()));
+                messageId, clock.instant().atOffset(ZoneOffset.UTC));
         return inserted == 1;
     }
 
@@ -32,6 +34,6 @@ public class ProcessedMessages {
     @Scheduled(cron = "0 20 3 * * *", zone = "Asia/Kolkata")
     public void purgeOld() {
         jdbcTemplate.update("DELETE FROM processed_messages WHERE processed_at < ?",
-                Timestamp.valueOf(LocalDateTime.now().minusDays(30)));
+                clock.instant().minus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));
     }
 }

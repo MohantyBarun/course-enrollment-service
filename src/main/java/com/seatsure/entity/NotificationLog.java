@@ -5,7 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 /** What happened to each notification: shown on the admin "Emails" page. Passwords are masked. */
@@ -46,5 +46,5 @@ public class NotificationLog {
     private String detail;
 
     @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 }

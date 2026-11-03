@@ -1,5 +1,8 @@
 package com.seatsure.service;
 
+import java.time.ZoneId;
+import java.time.Clock;
+import java.time.Instant;
 import com.seatsure.dto.AuthDtos.ChangePasswordRequest;
 import com.seatsure.dto.AuthDtos.LoginRequest;
 import com.seatsure.dto.AuthDtos.RegisterRequest;
@@ -25,7 +28,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,7 +51,7 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        auth = new AuthService(users, loginSecurity, encoder, tokens, outbox);
+        auth = new AuthService(users, loginSecurity, encoder, tokens, outbox, Clock.systemUTC(), ZoneId.of("Asia/Kolkata"));
         user = new User("Asha", "asha@x.com", encoder.encode("Right#123"), Roles.ROLE_CUSTOMER);
         ReflectionTestUtils.setField(user, "id", 7L);
         security = new LoginSecurity(user);
@@ -85,14 +87,14 @@ class AuthServiceTest {
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AccountLockedException.class);
         assertThat(security.getAccountStatus()).isEqualTo(AccountStatus.BLOCKED);
-        assertThat(security.getBlockExpiryAt()).isAfter(LocalDateTime.now().plusMinutes(29));
+        assertThat(security.getBlockExpiryAt()).isAfter(Instant.now().plus(Duration.ofMinutes(29)));
         verify(tokens, never()).issue(any());
     }
 
     @Test
     void login_whileBlocked_isRefusedEvenWithTheRightPassword() {
         security.setAccountStatus(AccountStatus.BLOCKED);
-        security.setBlockExpiryAt(LocalDateTime.now().plusMinutes(10));
+        security.setBlockExpiryAt(Instant.now().plus(Duration.ofMinutes(10)));
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "Right#123")))
                 .isInstanceOf(AccountLockedException.class);
@@ -102,14 +104,14 @@ class AuthServiceTest {
     @DisplayName("after a block expires the count is kept: the next wrong password blocks for twice as long")
     void login_afterBlockExpires_blocksEscalate() {
         security.setAccountStatus(AccountStatus.BLOCKED);
-        security.setBlockExpiryAt(LocalDateTime.now().minusMinutes(1));
-        security.setLastFailedAt(LocalDateTime.now().minusMinutes(31));
+        security.setBlockExpiryAt(Instant.now().minus(Duration.ofMinutes(1)));
+        security.setLastFailedAt(Instant.now().minus(Duration.ofMinutes(31)));
         security.setWrongPasswordCount(5);
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AccountLockedException.class).hasMessageContaining("1 hour");
         assertThat(security.getWrongPasswordCount()).isEqualTo(6);
-        assertThat(security.getBlockExpiryAt()).isAfter(LocalDateTime.now().plusMinutes(59));
+        assertThat(security.getBlockExpiryAt()).isAfter(Instant.now().plus(Duration.ofMinutes(59)));
     }
 
     @Test
@@ -121,13 +123,13 @@ class AuthServiceTest {
                 .isInstanceOf(AccountLockedException.class).hasMessageContaining("24 hours");
         assertThat(security.getPermanentBlock()).isFalse();
         assertThat(security.getAccountStatus()).isEqualTo(AccountStatus.BLOCKED);
-        assertThat(security.getBlockExpiryAt()).isBefore(LocalDateTime.now().plusHours(24).plusMinutes(1));
+        assertThat(security.getBlockExpiryAt()).isBefore(Instant.now().plus(Duration.ofHours(24)).plus(Duration.ofMinutes(1)));
     }
 
     @Test
     void login_failuresOlderThanADay_areForgotten() {
         security.setWrongPasswordCount(4);
-        security.setLastFailedAt(LocalDateTime.now().minusDays(2));
+        security.setLastFailedAt(Instant.now().minus(Duration.ofDays(2)));
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AuthenticationFailedException.class);

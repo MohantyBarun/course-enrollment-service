@@ -25,7 +25,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -134,7 +134,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
     private static void writeError(HttpServletResponse response, int status, String message) throws IOException {
         response.setStatus(status);
         response.setContentType("application/json");
-        response.getWriter().write("{\"timestamp\":\"" + LocalDateTime.now() + "\",\"status\":" + status
+        response.getWriter().write("{\"timestamp\":\"" + Instant.now() + "\",\"status\":" + status
                 + ",\"error\":\"" + message + "\"}");
     }
 

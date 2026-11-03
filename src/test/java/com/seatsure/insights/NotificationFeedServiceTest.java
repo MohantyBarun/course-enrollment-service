@@ -1,5 +1,7 @@
 package com.seatsure.insights;
 
+import java.time.Clock;
+import java.time.Instant;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.seatsure.entity.NotificationLog;
 import com.seatsure.entity.OutboxEvent;
@@ -14,7 +16,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,13 +33,13 @@ class NotificationFeedServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new NotificationFeedService(outboxRepository, notificationLog, new ObjectMapper(), emailSender, false);
+        service = new NotificationFeedService(outboxRepository, notificationLog, new ObjectMapper(), emailSender, false, Clock.systemUTC());
     }
 
     private static OutboxEvent event(String email) {
         return OutboxEvent.pending("User", "1", OutboxEvents.USER_REGISTERED,
                 "{\"userId\":1,\"name\":\"Asha\",\"email\":\"" + email + "\"}",
-                LocalDateTime.now());
+                Instant.now());
     }
 
     private static NotificationLog logFor(OutboxEvent e, NotificationLog.Delivery delivery) {
@@ -50,22 +51,22 @@ class NotificationFeedServiceTest {
         log.setBodyPreview("Hi Asha, your SeatSure account is ready.");
         log.setDelivery(delivery);
         log.setDetail(delivery == NotificationLog.Delivery.SENT ? "Accepted by the SMTP server" : "Not sent: demo mode");
-        log.setCreatedAt(LocalDateTime.now());
+        log.setCreatedAt(Instant.now());
         return log;
     }
 
     @Test
     void combinesOutboxStateWithDeliveryRecords() {
         OutboxEvent sent = event("asha@x.com");
-        sent.markPublished(LocalDateTime.now());
+        sent.markPublished(Instant.now());
         OutboxEvent logged = event("asha@x.com");
-        logged.markPublished(LocalDateTime.now());
+        logged.markPublished(Instant.now());
         OutboxEvent queued = event("queued@x.com");
         OutboxEvent retrying = event("retry@x.com");
-        retrying.markFailed("SMTP timeout", LocalDateTime.now(), 10);
+        retrying.markFailed("SMTP timeout", Instant.now(), 10);
         OutboxEvent failed = event("dead@x.com");
         failed.setAttempts(9);
-        failed.markFailed("SMTP 550", LocalDateTime.now(), 10);
+        failed.markFailed("SMTP 550", Instant.now(), 10);
         when(outboxRepository.findTop50ByOrderByCreatedAtDesc()).thenReturn(List.of(sent, logged, queued, retrying, failed));
         when(notificationLog.findByMessageIdIn(anyCollection()))
                 .thenReturn(List.of(logFor(sent, NotificationLog.Delivery.SENT), logFor(logged, NotificationLog.Delivery.SKIPPED)));
@@ -88,7 +89,7 @@ class NotificationFeedServiceTest {
     @Test
     void inProcess_publishedWithoutARecord_predatesTracking_andTheAllowlistIsMasked() {
         OutboxEvent old = event("asha@x.com");
-        old.markPublished(LocalDateTime.now());
+        old.markPublished(Instant.now());
         when(outboxRepository.findTop50ByOrderByCreatedAtDesc()).thenReturn(List.of(old));
         when(notificationLog.findByMessageIdIn(anyCollection())).thenReturn(List.of());
         when(emailSender.mode()).thenReturn("SMTP for 2 allowlisted recipients; others logged only");
@@ -103,12 +104,12 @@ class NotificationFeedServiceTest {
     @Test
     void publishedWithoutARecord_isWithTheBroker() {
         OutboxEvent published = event("asha@x.com");
-        published.markPublished(LocalDateTime.now());
+        published.markPublished(Instant.now());
         when(outboxRepository.findTop50ByOrderByCreatedAtDesc()).thenReturn(List.of(published));
         when(notificationLog.findByMessageIdIn(anyCollection())).thenReturn(List.of());
         when(emailSender.mode()).thenReturn("SMTP");
 
-        assertThat(new NotificationFeedService(outboxRepository, notificationLog, new ObjectMapper(), emailSender, true)
+        assertThat(new NotificationFeedService(outboxRepository, notificationLog, new ObjectMapper(), emailSender, true, Clock.systemUTC())
                 .latest().entries().get(0).status()).isEqualTo(Status.IN_BROKER);
     }
 }

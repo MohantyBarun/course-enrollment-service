@@ -1,5 +1,6 @@
 package com.seatsure.insights;
 
+import java.time.Clock;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.ConflictException;
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -35,13 +36,15 @@ public class TestEmailService {
     private final OutboxEventRepository outboxRepository;
     private final EmailSender emailSender;
     private final Duration cooldown;
+    private final Clock clock;
 
     public TestEmailService(OutboxService outbox, OutboxEventRepository outboxRepository, EmailSender emailSender,
-                            @Value("${app.mail.test-cooldown:PT5M}") Duration cooldown) {
+                            @Value("${app.mail.test-cooldown:PT5M}") Duration cooldown, Clock clock) {
         this.outbox = outbox;
         this.outboxRepository = outboxRepository;
         this.emailSender = emailSender;
         this.cooldown = cooldown;
+        this.clock = clock;
     }
 
     @Transactional
@@ -49,7 +52,7 @@ public class TestEmailService {
         String to = resolveRecipient(requestedTo);
         Optional<OutboxEvent> last = outboxRepository.findFirstByEventTypeOrderByCreatedAtDesc(OutboxEvents.TEST_EMAIL);
         if (last.isPresent()) {
-            Duration since = Duration.between(last.get().getCreatedAt(), LocalDateTime.now());
+            Duration since = Duration.between(last.get().getCreatedAt(), clock.instant());
             if (since.compareTo(cooldown) < 0) {
                 long wait = Math.max(1, cooldown.minus(since).toSeconds());
                 throw new ConflictException("A test email was sent " + since.toSeconds() + " seconds ago. "

@@ -35,6 +35,7 @@ public class SeatChangeListener {
     private final ObjectMapper objectMapper;
     private volatile boolean running;
     private volatile boolean listening;
+    private boolean everConnected; // only touched by the listener thread
     private Thread thread;
 
     public SeatChangeListener(JdbcConnectionDetails db, SeatStreams streams, ObjectMapper objectMapper) {
@@ -70,9 +71,15 @@ public class SeatChangeListener {
                     st.execute("LISTEN " + SeatEvents.CHANNEL);
                 }
                 PGConnection pg = connection.unwrap(PGConnection.class);
+                boolean reconnected = everConnected;
                 listening = true;
+                everConnected = true;
                 backoff = Duration.ofSeconds(1);
                 log.info("Listening for seat changes");
+                if (reconnected) {
+                    // Notifications sent while we were disconnected are gone: open maps must refetch
+                    log.info("Seat change listener reconnected; asked {} open seat map(s) to reload", streams.reloadAll());
+                }
                 while (running) {
                     PGNotification[] notifications = pg.getNotifications(POLL_MILLIS);
                     if (notifications == null) {
