@@ -72,6 +72,14 @@ public class OutboxEvent {
         return e;
     }
 
+    /**
+     * Claimed by a relay: other relays skip it until {@code until}. If the claiming relay dies
+     * mid-send, the event becomes due again then (at-least-once; consumers de-duplicate by id).
+     */
+    public void lease(Instant until) {
+        nextAttemptAt = until;
+    }
+
     public void markPublished(Instant now) {
         status = Status.PUBLISHED;
         publishedAt = now;

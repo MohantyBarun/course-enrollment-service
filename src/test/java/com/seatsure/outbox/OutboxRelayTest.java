@@ -15,6 +15,12 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.Duration;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.Optional;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,11 +40,18 @@ class OutboxRelayTest {
     @BeforeEach
     void setUp() {
         lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        relay = new OutboxRelay(repository, transport, transactionManager, meters, 2, 3, Duration.ofDays(7), Clock.systemUTC());
+        relay = new OutboxRelay(repository, transport, transactionManager, meters, 2, 3, Duration.ofDays(7),
+                Duration.ofMinutes(5), Clock.systemUTC());
+        // The outcome is recorded on a fresh load of the event, in its own transaction
+        lenient().when(repository.findById(any())).thenAnswer(i -> Optional.ofNullable(events.get(i.<UUID>getArgument(0))));
     }
 
-    private static OutboxEvent event() {
-        return OutboxEvent.pending("User", "1", OutboxEvents.USER_REGISTERED, "{}", Instant.now());
+    private final Map<UUID, OutboxEvent> events = new HashMap<>();
+
+    private OutboxEvent event() {
+        OutboxEvent e = OutboxEvent.pending("User", "1", OutboxEvents.USER_REGISTERED, "{}", Instant.now());
+        events.put(e.getId(), e);
+        return e;
     }
 
     private double relayed(String outcome) {
@@ -108,6 +121,55 @@ class OutboxRelayTest {
 
         assertThat(relay.relayPending()).isEqualTo(5);
         verify(repository, times(3)).lockNextBatch(any(), eq(2));
+    }
+
+    @Test
+    void claimedEvents_areLeased_soOtherRelaysSkipThemWhileSending() throws Exception {
+        OutboxEvent e = event();
+        Instant[] leasedUntil = new Instant[1];
+        when(repository.lockNextBatch(any(), eq(2))).thenReturn(List.of(e));
+        doAnswer(i -> {
+            leasedUntil[0] = e.getNextAttemptAt(); // what other relays see while this one sends
+            return null;
+        }).when(transport).send(any());
+
+        relay.relayPending();
+
+        assertThat(leasedUntil[0]).isAfter(Instant.now().plus(Duration.ofMinutes(4)));
+        assertThat(e.getStatus()).isEqualTo(OutboxEvent.Status.PUBLISHED);
+    }
+
+    @Test
+    @DisplayName("no transaction is open while the transport sends")
+    void sending_happensOutsideAnyTransaction() throws Exception {
+        OutboxEvent e = event();
+        when(repository.lockNextBatch(any(), eq(2))).thenReturn(List.of(e));
+        List<String> calls = new ArrayList<>();
+        when(transactionManager.getTransaction(any())).thenAnswer(i -> {
+            calls.add("begin");
+            return new SimpleTransactionStatus();
+        });
+        doAnswer(i -> calls.add("commit")).when(transactionManager).commit(any());
+        doAnswer(i -> calls.add("send")).when(transport).send(any());
+
+        relay.relayPending();
+
+        assertThat(calls).containsExactly("begin", "commit", "send", "begin", "commit");
+    }
+
+    @Test
+    void anEventFinishedByAnotherRelay_isLeftAlone() throws Exception {
+        OutboxEvent e = event();
+        when(repository.lockNextBatch(any(), eq(2))).thenReturn(List.of(e));
+        doAnswer(i -> {
+            e.markPublished(Instant.now()); // our lease ran out; another relay sent and recorded it
+            return null;
+        }).when(transport).send(any());
+
+        relay.relayPending();
+
+        assertThat(relayed("published")).isZero();
+        assertThat(e.getStatus()).isEqualTo(OutboxEvent.Status.PUBLISHED);
     }
 
     @Test
