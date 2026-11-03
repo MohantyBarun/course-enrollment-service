@@ -79,7 +79,8 @@ class MovieVisibilityIntegrationTest {
                 .andExpect(jsonPath("$[?(@.id == %d)].visibility", comingSoon).value("COMING_SOON"))
                 .andExpect(jsonPath("$[?(@.id == %d)].visibility", showing).value("NOW_SHOWING"))
                 .andExpect(jsonPath("$[?(@.id == %d)].upcomingShows", showing).value(1))
-                .andExpect(jsonPath("$[?(@.id == %d)].showingIn[*]", showing).value(List.of("Pune")));
+                .andExpect(jsonPath("$[?(@.id == %d)].showingIn[0]", showing).value("Pune"))
+                .andExpect(jsonPath("$[?(@.id == %d)].showingIn[1]", showing).doesNotExist());
     }
 
     private Long movie(LocalDate releaseDate) {
