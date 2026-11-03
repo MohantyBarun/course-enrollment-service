@@ -2,7 +2,7 @@ package com.seatsure.service;
 
 import com.seatsure.config.CacheConfig;
 import com.seatsure.dto.BookingDtos.BookingView;
-import com.seatsure.dto.PagedResponseDTO;
+import com.seatsure.dto.PageView;
 import com.seatsure.entity.*;
 import com.seatsure.exception.BadRequestException;
 import com.seatsure.exception.ConflictException;
@@ -82,8 +82,7 @@ public class BookingService {
                 .sorted(Comparator.comparing((ShowSeat ss) -> ss.getSeat().getRowLabel())
                         .thenComparingInt(ss -> ss.getSeat().getSeatNumber()))
                 .forEach(ss -> booking.addSeat(ss.getSeat(), quote.priceOf(ss)));
-        booking.setConvenienceFeePaise(hold.getConvenienceFeePaise());
-        booking.setPayment(payment);
+        booking.paidWith(payment, hold.getConvenienceFeePaise());
         bookings.save(booking);
         seats.forEach(ss -> ss.book(booking));
         seatEvents.seatsChanged(show.getId(), seats);
@@ -144,11 +143,11 @@ public class BookingService {
     }
 
     @Transactional(readOnly = true)
-    public PagedResponseDTO<BookingView> mine(Long userId, int page, int size) {
+    public PageView<BookingView> mine(Long userId, int page, int size) {
         Instant now = clock.instant();
         var result = bookings.findForUser(userId, PageRequest.of(page, size))
                 .map(b -> BookingView.of(b, isCancellable(b, now)));
-        return PagedResponseDTO.from(result);
+        return PageView.from(result);
     }
 
     boolean isCancellable(Booking booking, Instant now) {

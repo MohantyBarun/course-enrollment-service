@@ -1,5 +1,6 @@
 package com.seatsure.idempotency;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.time.Clock;
 import com.seatsure.entity.IdempotencyRecord;
 import com.seatsure.repository.IdempotencyRecordRepository;
@@ -86,13 +87,7 @@ public class IdempotencyService {
                 return new Claim.InProgress(); // another retry reclaimed it a moment ago
             }
         }
-        IdempotencyRecord record = new IdempotencyRecord();
-        record.setOwner(owner);
-        record.setIdempotencyKey(key);
-        record.setRequestHash(requestHash);
-        record.setStatus(IdempotencyRecord.Status.IN_PROGRESS);
-        record.setCreatedAt(now);
-        record.setExpiresAt(now.plus(ttl));
+        IdempotencyRecord record = IdempotencyRecord.inProgress(owner, key, requestHash, now, now.plus(ttl));
         return new Claim.Acquired(repository.saveAndFlush(record).getId());
     }
 
@@ -107,13 +102,8 @@ public class IdempotencyService {
     }
 
     public void complete(Long recordId, int status, String body, String contentType, String location) {
-        tx.executeWithoutResult(s -> repository.findById(recordId).ifPresent(record -> {
-            record.setStatus(IdempotencyRecord.Status.COMPLETED);
-            record.setResponseStatus(status);
-            record.setResponseBody(body == null || body.isEmpty() ? null : secretBox.encrypt(body));
-            record.setResponseContentType(contentType);
-            record.setResponseLocation(location);
-        }));
+        tx.executeWithoutResult(s -> repository.findById(recordId).ifPresent(record -> record.complete(status,
+                body == null || body.isEmpty() ? null : secretBox.encrypt(body), contentType, location)));
     }
 
     /** Frees the key after a server error, so the client's retry runs the request again. */
@@ -122,6 +112,7 @@ public class IdempotencyService {
     }
 
     @Scheduled(cron = "0 25 3 * * *", zone = "Asia/Kolkata")
+    @SchedulerLock(name = "purge-idempotency-keys", lockAtLeastFor = "PT1M")
     public void purgeExpired() {
         Integer deleted = tx.execute(s -> repository.deleteExpired(clock.instant()));
         log.info("Purged {} expired idempotency keys", deleted);

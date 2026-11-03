@@ -3,7 +3,6 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 /**
  * A seat's state for one show: the row that concurrent requests lock and compete for.
@@ -11,7 +10,6 @@ import lombok.Setter;
  */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "show_seats")
 public class ShowSeat {

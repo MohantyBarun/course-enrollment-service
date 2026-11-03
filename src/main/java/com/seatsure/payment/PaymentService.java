@@ -96,9 +96,10 @@ public class PaymentService {
             return;
         }
         if (amountPaise != payment.getAmountPaise()) {
-            // Never confirm on a mismatched amount: flag it and refund what was taken
+            // Never confirm on a mismatched amount: refund exactly what was taken (not what was due)
             payment.moveTo(Payment.Status.SUCCEEDED, null, now);
-            refunds.refund(payment, "Amount mismatch (" + amountPaise + " paid, " + payment.getAmountPaise() + " due)", now);
+            refunds.refund(payment, amountPaise,
+                    "Amount mismatch (" + amountPaise + " paid, " + payment.getAmountPaise() + " due)", now);
             log.error("Payment {} amount mismatch: got {}, expected {}", gatewayRef, amountPaise, payment.getAmountPaise());
             return;
         }
@@ -108,8 +109,7 @@ public class PaymentService {
 
         if (hold.isLive(now) && show.isBookable(now)) {
             Booking booking = bookings.createFromHold(hold, payment, now);
-            hold.setBooking(booking);
-            hold.close(SeatHold.Status.CONVERTED, now);
+            hold.convertTo(booking, now);
             waitlist.holdEnded(hold, true, now);
             meters.counter("payments.outcome", "result", "confirmed").increment();
             log.info("Payment {} confirmed hold {} as booking {}", gatewayRef, hold.getId(), booking.getReference());

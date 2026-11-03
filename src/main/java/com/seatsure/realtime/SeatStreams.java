@@ -1,5 +1,7 @@
 package com.seatsure.realtime;
 
+import org.springframework.context.event.EventListener;
+import org.springframework.context.event.ContextClosedEvent;
 import com.seatsure.entity.ShowSeatStatus;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -93,6 +95,18 @@ public class SeatStreams {
             });
         });
         return sent[0];
+    }
+
+    /**
+     * On shutdown (a deploy), end every stream first. Graceful shutdown waits for in-flight requests,
+     * and an open stream never finishes on its own, so each would hold the old instance for the full
+     * shutdown timeout. Browsers' EventSource reconnects by itself, to an instance that's still up.
+     * ContextClosedEvent comes before the web server's graceful shutdown starts.
+     */
+    @EventListener(ContextClosedEvent.class)
+    public void closeAll() {
+        byShow.values().forEach(watchers -> watchers.forEach(SseEmitter::complete));
+        byShow.clear();
     }
 
     /** A comment line every 20 seconds, so proxies don't close streams that are quiet. */

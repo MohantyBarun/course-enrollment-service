@@ -124,9 +124,7 @@ public class HoldService {
 
         Pricing.Quote quote = pricing.quote(showId, wanted);
         SeatHold hold = new SeatHold(show, users.getReferenceById(userId), SeatHold.Source.CUSTOMER, now, now.plus(ttl));
-        hold.setSeatCount(wanted.size());
-        hold.setTicketsPaise(quote.ticketsPaise());
-        hold.setConvenienceFeePaise(quote.feePaise());
+        hold.price(wanted.size(), quote.ticketsPaise(), quote.feePaise());
         holds.save(hold);
         wanted.forEach(ss -> ss.hold(hold));
         seatEvents.seatsChanged(showId, wanted); // broadcast on commit

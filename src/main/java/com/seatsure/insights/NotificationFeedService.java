@@ -1,5 +1,6 @@
 package com.seatsure.insights;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.time.Duration;
 import java.time.Clock;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -132,6 +133,7 @@ public class NotificationFeedService {
 
     @Transactional
     @Scheduled(cron = "0 30 3 * * *", zone = "Asia/Kolkata")
+    @SchedulerLock(name = "purge-notification-log", lockAtLeastFor = "PT1M")
     public void purgeOld() {
         int deleted = notificationLog.deleteCreatedBefore(clock.instant().minus(Duration.ofDays(30)));
         log.info("Purged {} notification log rows older than 30 days", deleted);

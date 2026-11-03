@@ -1,17 +1,18 @@
 package com.seatsure.entity;
 
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import org.springframework.data.annotation.CreatedDate;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Duration;
 import java.time.Instant;
 
 /** One screening of a movie on a screen. The database forbids two scheduled shows overlapping on a screen. */
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "shows")
 public class Show {
@@ -45,8 +46,9 @@ public class Show {
     @Column(name = "status", nullable = false, length = 20)
     private ShowStatus status = ShowStatus.SCHEDULED;
 
+    @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt = Instant.now();
+    private Instant createdAt;
 
     public Show(Movie movie, Screen screen, Instant startsAt, ShowFormat format) {
         this.movie = movie;
@@ -59,5 +61,9 @@ public class Show {
     /** Bookings close when the show starts. */
     public boolean isBookable(Instant now) {
         return status == ShowStatus.SCHEDULED && now.isBefore(startsAt);
+    }
+
+    public void cancel() {
+        this.status = ShowStatus.CANCELLED;
     }
 }

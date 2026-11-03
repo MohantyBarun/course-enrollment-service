@@ -2,7 +2,7 @@ package com.seatsure.controller;
 
 import com.seatsure.dto.BookingDtos.BookingView;
 import com.seatsure.dto.BookingDtos.CancelRequest;
-import com.seatsure.dto.PagedResponseDTO;
+import com.seatsure.dto.PageView;
 import com.seatsure.service.BookingService;
 import com.seatsure.util.CurrentUser;
 import io.swagger.v3.oas.annotations.Operation;
@@ -27,7 +27,7 @@ public class BookingController {
 
     @Operation(summary = "Your bookings, latest show first")
     @GetMapping("/bookings/me")
-    public PagedResponseDTO<BookingView> mine(@RequestParam(defaultValue = "0") @Min(0) int page,
+    public PageView<BookingView> mine(@RequestParam(defaultValue = "0") @Min(0) int page,
                                               @RequestParam(defaultValue = "10") @Min(1) @Max(50) int size,
                                               @Parameter(hidden = true) @AuthenticationPrincipal CurrentUser user) {
         return bookings.mine(user.id(), page, size);

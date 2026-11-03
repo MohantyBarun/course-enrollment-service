@@ -51,7 +51,8 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        auth = new AuthService(users, loginSecurity, encoder, tokens, outbox, Clock.systemUTC(), ZoneId.of("Asia/Kolkata"));
+        auth = new AuthService(users, loginSecurity,
+                new LoginThrottle(loginSecurity, Clock.systemUTC(), ZoneId.of("Asia/Kolkata")), encoder, tokens, outbox);
         user = new User("Asha", "asha@x.com", encoder.encode("Right#123"), Roles.ROLE_CUSTOMER);
         ReflectionTestUtils.setField(user, "id", 7L);
         security = new LoginSecurity(user);
@@ -62,7 +63,7 @@ class AuthServiceTest {
 
     @Test
     void login_success_resetsFailuresAndIssuesTokens() {
-        security.setWrongPasswordCount(3);
+        ReflectionTestUtils.setField(security, "wrongPasswordCount", 3);
 
         auth.login(new LoginRequest("ASHA@x.com ", "Right#123"));
 
@@ -82,7 +83,7 @@ class AuthServiceTest {
 
     @Test
     void login_fifthWrongPassword_blocksFor30Minutes() {
-        security.setWrongPasswordCount(4);
+        ReflectionTestUtils.setField(security, "wrongPasswordCount", 4);
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AccountLockedException.class);
@@ -93,8 +94,8 @@ class AuthServiceTest {
 
     @Test
     void login_whileBlocked_isRefusedEvenWithTheRightPassword() {
-        security.setAccountStatus(AccountStatus.BLOCKED);
-        security.setBlockExpiryAt(Instant.now().plus(Duration.ofMinutes(10)));
+        ReflectionTestUtils.setField(security, "accountStatus", AccountStatus.BLOCKED);
+        ReflectionTestUtils.setField(security, "blockExpiryAt", Instant.now().plus(Duration.ofMinutes(10)));
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "Right#123")))
                 .isInstanceOf(AccountLockedException.class);
@@ -103,10 +104,10 @@ class AuthServiceTest {
     @Test
     @DisplayName("after a block expires the count is kept: the next wrong password blocks for twice as long")
     void login_afterBlockExpires_blocksEscalate() {
-        security.setAccountStatus(AccountStatus.BLOCKED);
-        security.setBlockExpiryAt(Instant.now().minus(Duration.ofMinutes(1)));
-        security.setLastFailedAt(Instant.now().minus(Duration.ofMinutes(31)));
-        security.setWrongPasswordCount(5);
+        ReflectionTestUtils.setField(security, "accountStatus", AccountStatus.BLOCKED);
+        ReflectionTestUtils.setField(security, "blockExpiryAt", Instant.now().minus(Duration.ofMinutes(1)));
+        ReflectionTestUtils.setField(security, "lastFailedAt", Instant.now().minus(Duration.ofMinutes(31)));
+        ReflectionTestUtils.setField(security, "wrongPasswordCount", 5);
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AccountLockedException.class).hasMessageContaining("1 hour");
@@ -117,7 +118,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("failed logins never block an account for good, so nobody can lock its owner out permanently")
     void login_manyWrongPasswords_neverBlockPermanently() {
-        security.setWrongPasswordCount(40);
+        ReflectionTestUtils.setField(security, "wrongPasswordCount", 40);
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AccountLockedException.class).hasMessageContaining("24 hours");
@@ -127,9 +128,22 @@ class AuthServiceTest {
     }
 
     @Test
+    @DisplayName("a day-long block doesn't wipe its own failures when it ends: the next wrong password blocks again")
+    void login_afterADayLongBlock_stillEscalates() {
+        ReflectionTestUtils.setField(security, "accountStatus", AccountStatus.BLOCKED);
+        ReflectionTestUtils.setField(security, "blockExpiryAt", Instant.now().minus(Duration.ofMinutes(1)));
+        ReflectionTestUtils.setField(security, "lastFailedAt", Instant.now().minus(Duration.ofHours(25)));
+        ReflectionTestUtils.setField(security, "wrongPasswordCount", 11);
+
+        assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
+                .isInstanceOf(AccountLockedException.class).hasMessageContaining("24 hours");
+        assertThat(security.getWrongPasswordCount()).isEqualTo(12);
+    }
+
+    @Test
     void login_failuresOlderThanADay_areForgotten() {
-        security.setWrongPasswordCount(4);
-        security.setLastFailedAt(Instant.now().minus(Duration.ofDays(2)));
+        ReflectionTestUtils.setField(security, "wrongPasswordCount", 4);
+        ReflectionTestUtils.setField(security, "lastFailedAt", Instant.now().minus(Duration.ofDays(2)));
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "wrong")))
                 .isInstanceOf(AuthenticationFailedException.class);
@@ -139,7 +153,7 @@ class AuthServiceTest {
 
     @Test
     void login_permanentBlockSetBySupport_isStillHonoured() {
-        security.setPermanentBlock(true);
+        ReflectionTestUtils.setField(security, "permanentBlock", true);
 
         assertThatThrownBy(() -> auth.login(new LoginRequest("asha@x.com", "Right#123")))
                 .isInstanceOf(AccountLockedException.class).hasMessageContaining("contact support");
@@ -148,11 +162,11 @@ class AuthServiceTest {
 
     @Test
     void blockDuration_doublesFromHalfAnHourUpToADay() {
-        assertThat(AuthService.blockDuration(5)).isEqualTo(Duration.ofMinutes(30));
-        assertThat(AuthService.blockDuration(6)).isEqualTo(Duration.ofHours(1));
-        assertThat(AuthService.blockDuration(9)).isEqualTo(Duration.ofHours(8));
-        assertThat(AuthService.blockDuration(11)).isEqualTo(Duration.ofHours(24));
-        assertThat(AuthService.blockDuration(1_000)).isEqualTo(Duration.ofHours(24));
+        assertThat(LoginThrottle.blockDuration(5)).isEqualTo(Duration.ofMinutes(30));
+        assertThat(LoginThrottle.blockDuration(6)).isEqualTo(Duration.ofHours(1));
+        assertThat(LoginThrottle.blockDuration(9)).isEqualTo(Duration.ofHours(8));
+        assertThat(LoginThrottle.blockDuration(11)).isEqualTo(Duration.ofHours(24));
+        assertThat(LoginThrottle.blockDuration(1_000)).isEqualTo(Duration.ofHours(24));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.seatsure.notification;
 
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,6 +33,7 @@ public class ProcessedMessages {
 
     @Transactional
     @Scheduled(cron = "0 20 3 * * *", zone = "Asia/Kolkata")
+    @SchedulerLock(name = "purge-processed-messages", lockAtLeastFor = "PT1M")
     public void purgeOld() {
         jdbcTemplate.update("DELETE FROM processed_messages WHERE processed_at < ?",
                 clock.instant().minus(Duration.ofDays(30)).atOffset(ZoneOffset.UTC));

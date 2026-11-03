@@ -3,7 +3,6 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -14,7 +13,6 @@ import java.util.UUID;
  */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "refresh_tokens")
 public class RefreshToken {
@@ -52,5 +50,9 @@ public class RefreshToken {
 
     public boolean isRevoked() {
         return revokedAt != null;
+    }
+
+    public void revoke(Instant now) {
+        this.revokedAt = now;
     }
 }

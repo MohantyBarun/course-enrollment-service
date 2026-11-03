@@ -3,14 +3,12 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 
 /** A customer queued for a sold-out show. */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "waitlist_entries")
 public class WaitlistEntry implements OwnedByUser {
@@ -61,5 +59,11 @@ public class WaitlistEntry implements OwnedByUser {
     public void moveTo(Status next, Instant now) {
         this.status = next;
         this.updatedAt = now;
+    }
+
+    /** Seats were freed and are now held for this entry. */
+    public void offer(SeatHold hold, Instant now) {
+        this.hold = hold;
+        moveTo(Status.OFFERED, now);
     }
 }

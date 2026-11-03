@@ -10,7 +10,9 @@ import com.seatsure.payment.PaymentWebhookService;
 import com.seatsure.payment.mock.MockPaymentGateway;
 import com.seatsure.service.HoldService;
 import com.seatsure.service.WaitlistService;
-import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.MovieAdminService;
+import com.seatsure.service.ShowScheduleService;
+import com.seatsure.service.VenueAdminService;
 import com.seatsure.service.BookingService;
 import com.seatsure.service.CatalogService;
 import com.seatsure.service.DashboardService;
@@ -52,7 +54,9 @@ class AccessRulesTest {
 
     @MockitoBean private CatalogService catalog;
     @MockitoBean private BookingService bookings;
-    @MockitoBean private AdminCatalogService adminCatalog;
+    @MockitoBean private MovieAdminService movieAdmin;
+    @MockitoBean private VenueAdminService venueAdmin;
+    @MockitoBean private ShowScheduleService showSchedule;
     @MockitoBean private DashboardService dashboard;
     @MockitoBean private HoldService holds;
     @MockitoBean private PaymentService payments;

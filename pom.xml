@@ -31,6 +31,8 @@
 		<!-- Boot 3.4.4 pins 1.20.6, which speaks Docker API 1.32; current Docker Engines (e.g. on GitHub
 		     runners) require 1.40+, so Testcontainers could not connect and every integration test was skipped -->
 		<testcontainers.version>1.21.4</testcontainers.version>
+		<!-- 6.x is the line for Spring Framework 6 (Boot 3); 7.x targets Spring 7 -->
+		<shedlock.version>6.10.0</shedlock.version>
 	</properties>
 	<dependencies>
 		<!-- JPA -->
@@ -141,6 +143,17 @@
 			<groupId>io.github.resilience4j</groupId>
 			<artifactId>resilience4j-spring-boot3</artifactId>
 			<version>2.2.0</version>
+		</dependency>
+		<!-- Scheduled jobs that must run once across instances (demo reset, purges) -->
+		<dependency>
+			<groupId>net.javacrumbs.shedlock</groupId>
+			<artifactId>shedlock-spring</artifactId>
+			<version>${shedlock.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>net.javacrumbs.shedlock</groupId>
+			<artifactId>shedlock-provider-jdbc-template</artifactId>
+			<version>${shedlock.version}</version>
 		</dependency>
 
 		<!-- Integration tests against real PostgreSQL, Redis and RabbitMQ (needs Docker; skipped without it) -->

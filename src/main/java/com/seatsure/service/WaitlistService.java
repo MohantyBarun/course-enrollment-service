@@ -137,13 +137,10 @@ public class WaitlistService {
     private void offer(Show show, WaitlistEntry entry, List<ShowSeat> seats, Instant now) {
         Pricing.Quote quote = pricing.quote(show.getId(), seats);
         SeatHold hold = new SeatHold(show, entry.getUser(), SeatHold.Source.WAITLIST, now, now.plus(holdTtl));
-        hold.setSeatCount(seats.size());
-        hold.setTicketsPaise(quote.ticketsPaise());
-        hold.setConvenienceFeePaise(quote.feePaise());
+        hold.price(seats.size(), quote.ticketsPaise(), quote.feePaise());
         holds.save(hold);
         seats.forEach(ss -> ss.hold(hold));
-        entry.setHold(hold);
-        entry.moveTo(WaitlistEntry.Status.OFFERED, now);
+        entry.offer(hold, now);
 
         User user = entry.getUser();
         outbox.record("SeatHold", hold.getId(), OutboxEvents.SEATS_OFFERED, new OutboxEvents.SeatsOffered(

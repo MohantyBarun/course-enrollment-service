@@ -73,7 +73,8 @@ flowchart LR
 
 ### Live seat map
 - Every seat change calls `pg_notify` **inside the transaction that makes it**. PostgreSQL delivers a notification only when its transaction commits, in commit order, and never for one that rolls back. So a seat a customer failed to hold is never shown as taken, and every app instance hears every change.
-- Each instance `LISTEN`s on a dedicated connection (not one borrowed from the small free-tier pool) and fans changes out to browsers over **Server-Sent Events** (`GET /shows/{id}/seats/stream`). It reconnects with backoff if that connection drops.
+- Each instance `LISTEN`s on a dedicated connection (not one borrowed from the small free-tier pool) and fans changes out to browsers over **Server-Sent Events** (`GET /shows/{id}/seats/stream`). It reconnects with backoff if that connection drops, then tells every open map to **reload**: notifications sent while it was disconnected are gone for good.
+- On shutdown (every deploy) all streams are closed first, so graceful shutdown doesn't wait out its timeout on connections that never finish; browsers reconnect to a live instance by themselves.
 - **The client subscribes first, then fetches.** The stream sends `ready`, then the browser fetches the map and replays any events that arrived meanwhile, so no change slips through between the snapshot and the stream. A dropped stream reconnects and refetches.
 
 ### Waitlist
@@ -81,23 +82,27 @@ flowchart LR
 
 ### Reliable emails (transactional outbox)
 - Bookings, cancellations, waitlist offers, refunds and sign-ups write an event to `outbox_events` **in the same transaction** as the change. A rolled-back change never sends an email, and an email is never lost because the broker or SMTP was down.
-- `OutboxRelay` delivers events right after commit and polls every 30s as a safety net. It claims batches with `FOR UPDATE SKIP LOCKED` (several instances can relay at once) and backs off exponentially, marking an event `FAILED` after 10 attempts.
+- `OutboxRelay` delivers events right after commit and polls every 30s as a safety net. It **claims** a batch with `FOR UPDATE SKIP LOCKED` and a lease, commits, then **sends with no transaction open** and records each outcome in a short transaction of its own. A slow mail server can't tie up the small connection pool, several instances can relay at once, and a relay that dies mid-send leaves events that come due again when the lease ends. Failures back off exponentially; an event is marked `FAILED` after 10 attempts.
 - With `RABBIT_ENABLED=true`, events go through RabbitMQ with publisher confirms, consumer retries and a **dead-letter queue**. Without a broker, the same relay hands events to the consumer in-process.
 - **Idempotent consumer:** the message id is recorded in the same transaction as the handling, so a redelivered message sends one email.
 
 ### Idempotent APIs
 - Holding seats, starting a payment, joining a waitlist, cancelling a booking and the admin create/cancel calls accept an `Idempotency-Key` header (Stripe-style). A retry with the same key replays the original response (`Idempotent-Replayed: true`) instead of acting twice.
   - Same key while the first request is still running: **409**. Same key with a different body: **422**. 5xx responses aren't stored, so they can be retried.
+  - The work commits before the response is stored. If an instance dies in between (a deploy), its key would stay "in progress"; after 2 minutes a retry reclaims it and runs again, which is safe because every endpoint re-checks its own state.
 - The frontend sends a fresh key per action and retries network failures with the same key, which matters while the free-tier server wakes up.
 
 ### Authentication
 - 15-minute JWT access tokens, and 7-day **rotating refresh tokens**: random 256-bit values stored only as SHA-256 hashes. Every refresh revokes the old token. If an already-rotated token shows up again, the session was copied (e.g. stolen), so the whole token family is revoked.
 - Roles: `ROLE_CUSTOMER` (books) and `ROLE_ADMIN` (runs the cinemas). Browsing is public.
-- Brute-force protection: a 30-minute lockout after 5 wrong passwords and a permanent block after 10. BCrypt hashing and a password-strength policy.
+- **Brute-force protection** (`LoginThrottle`): 5 wrong passwords block the account for 30 minutes, and each further one doubles the block, up to a day. It never becomes permanent, since anyone who knows an email address could otherwise lock its owner out for good. Failures older than a day are forgotten, and the counters row is locked during a login so parallel guesses are all counted. BCrypt hashing and a password-strength policy.
 
 ### Caching, rate limiting, resilience
 - The city home page ("now showing") and the admin dashboard are cached. Redis when `REDIS_ENABLED=true`, Caffeine otherwise. Evictions run after commit, and cache errors fall through to the database.
 - **Rate limits** per client IP, using an atomic fixed-window counter (a Redis Lua script or in memory): login 10/min, sign-up 5/min, demo login 20/min, token refresh 30/min, everything else 300/min. Rejected requests get **429** with `Retry-After`. If Redis is down, the limiter fails open behind a circuit breaker.
+- **The client IP can't be forged.** Proxies append to `X-Forwarded-For`, so its left end is whatever the client sent. The client is found by counting the trusted proxy hops back from the right (`TRUSTED_PROXIES`; 3 on Render: Cloudflare, Render's edge and its load balancer). `GET /admin/system/client-ip` shows the chain, masked, to check the setting on a new host.
+- **Scheduled jobs and several instances:** jobs that claim work with `SKIP LOCKED` (hold expiry, outbox and webhook delivery) share it safely. Jobs that must run once, the demo reset, the startup seed and the nightly purges, take a **ShedLock** lock in PostgreSQL first.
+- **The public demo admin** (open to every visitor) sees real customers' names and emails masked; seeded demo accounts stay readable.
 - Resilience4j circuit breakers around SMTP and Redis. The health check (`/actuator/health/liveness`) never depends on optional services.
 
 ### Observability
@@ -114,6 +119,34 @@ Flyway owns the schema and Hibernate only validates it, so a mismatched deploy f
 - `V4` outbox, processed messages, notification log, idempotency keys.
 - `V5` reference cities.
 - `V6` holds, payments, webhook events, waitlist.
+- `V7` every timestamp column as `timestamptz` (the code uses `Instant` and one injected `Clock` throughout).
+- `V8` ShedLock's lock table.
+
+## 🗂️ Code structure
+
+```
+com.seatsure
+├── controller/  REST endpoints: thin, validate input and delegate
+├── service/     the booking domain: catalogue, holds, bookings, waitlist, admin, auth
+├── repository/  Spring Data repositories (JPQL, and native SQL where locking needs it)
+├── entity/      JPA entities; state changes are named methods (hold.convertTo, show.cancel), no setters
+├── dto/         request/response records per area (CatalogDtos, CheckoutDtos, AdminDtos, ...)
+├── payment/     gateway port + mock gateway, webhook verification, refunds
+├── outbox/      transactional outbox and its relay
+├── messaging/   RabbitMQ transport and consumer (optional)
+├── notification/ email composition, sending, idempotent consumer
+├── realtime/    LISTEN/NOTIFY listener and SSE fan-out
+├── idempotency/ Idempotency-Key filter and store
+├── ratelimit/   client IP resolution and rate limiting
+├── insights/    the admin Emails and System pages
+├── demo/        demo data, the nightly reset, demo-admin privacy
+├── config/      security, caching, scheduling locks, time
+└── exception/   error types and the JSON error mapping
+```
+
+- **Two kinds of package, on purpose.** The booking domain is CRUD-shaped and its services call each other (a booking frees seats to the waitlist), so it is layered: `controller → service → repository`. The infrastructure pieces are self-contained mechanisms with a small surface, so each is a feature package that the domain uses through one class or interface.
+- **Swappable boundaries.** Every external dependency sits behind a small interface with implementations chosen by configuration: `PaymentGateway` (mock), `EmailSender` (SMTP, logging-only, allowlist decorator), `OutboxTransport` (in-process, RabbitMQ), `RateLimiter` (in-memory, Redis). The domain never knows which one runs.
+- **One responsibility per service.** For example the admin side is `MovieAdminService`, `VenueAdminService` and `ShowScheduleService`, and the lockout policy is `LoginThrottle`, separate from `AuthService`.
 
 ## ✅ Features
 
@@ -195,6 +228,7 @@ npm run dev                   # http://localhost:5173
 | `MANAGEMENT_OTLP_TRACING_ENDPOINT` | No | OTLP endpoint for traces |
 | `DATA_ENCRYPTION_KEY` | No | Base64 32-byte AES key for data encrypted at rest (default: derived from `JWT_SECRET`) |
 | `RATE_LIMIT_ENABLED` | No | `false` turns rate limiting off |
+| `TRUSTED_PROXIES` | No | Proxies in front of the app that append to `X-Forwarded-For` (default `0` = none; `3` in the prod profile, for Render) |
 | `PORT` | No | Default `8080` (set automatically by Render) |
 
 ## 🧪 Testing
@@ -209,12 +243,13 @@ CI runs everything on every push and PR, and **fails if any test is skipped**, s
 | Area | What's covered |
 |---|---|
 | Concurrency (Testcontainers PostgreSQL) | 30 customers racing for one seat → one winner; overlapping seat sets → no double holds, no deadlocks; all-or-nothing holds; holds replaced and expired; show cancellation racing holds |
-| Payments | Unsigned or forged webhooks refused, redelivered events processed once, a second success for a paid payment ignored, money arriving after the hold lapsed refunded |
-| Live seat map | A hold shows up on open seat maps and a failed hold never does; a cancelled show tells maps to reload |
+| Payments | Unsigned or forged webhooks refused, redelivered events processed once, a second success for a paid payment ignored, money arriving after the hold lapsed refunded, a wrong amount refunded (exactly what was taken) and never booked |
+| Live seat map | A hold shows up on open seat maps and a failed hold never does; a cancelled show tells maps to reload; killing the `LISTEN` connection makes open maps reload once it's back |
 | Waitlist | Only for sold-out shows; freed seats offered to the first customer whose request fits, passing to the next if unpaid; cancelled bookings' seats go to the queue |
 | Outbox & messaging (PostgreSQL + RabbitMQ) | Emails after commit only, publisher confirms, duplicates processed once, retries then dead-lettering |
-| Idempotency, rate limiting, cache (Redis) | Replays, 409/422 conflicts, limits per rule, 429 through the real filter chain, fail-open |
-| Auth | Token rotation and reuse detection, lockouts, role-based access |
+| Idempotency, rate limiting, cache (Redis) | Replays, 409/422 conflicts, reclaiming abandoned keys, limits per rule, forged `X-Forwarded-For` sharing the real client's budget, 429 through the real filter chain, fail-open |
+| Auth | Token rotation and reuse detection, escalating lockouts that never become permanent, role-based access, demo-admin masking |
+| Scheduling | A once-per-cluster job run again inside its lock window is skipped (ShedLock) |
 | Frontend | API client (refresh rotation, retries), live seat map hook against a fake `EventSource`, and the booking flow: city picker, seat selection, hold conflicts, waitlist, checkout and webhook polling, cancel, route guards, demo login |
 
 ## ☁️ Deployment (free tier)
@@ -233,4 +268,3 @@ Optional free add-ons (everything works without them): [Upstash](https://upstash
 
 ## 🔮 Upcoming
 - Load test (k6) with published latency numbers for the seat-hold path
-- Replace the permanent account lock with per-account backoff (the IP rate limit already slows guessing)

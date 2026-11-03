@@ -3,14 +3,12 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 
 /** One attempt to pay for a hold. Only PENDING moves (to SUCCEEDED or FAILED); SUCCEEDED can become REFUNDED. */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "payments")
 public class Payment implements OwnedByUser {

@@ -1,5 +1,7 @@
 package com.seatsure.insights;
 
+import com.seatsure.ratelimit.RateLimitProperties;
+import java.time.Clock;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import com.seatsure.entity.OutboxEvent;
 import com.seatsure.notification.EmailSender;
@@ -75,6 +77,7 @@ public class SystemStatusService {
     private final OutboxEventRepository outboxRepository;
     private final CircuitBreakerRegistry circuitBreakers;
     private final EmailSender emailSender;
+    private final Clock clock;
     private final boolean redisEnabled;
     private final boolean rabbitEnabled;
     private final boolean demoMode;
@@ -87,31 +90,28 @@ public class SystemStatusService {
                                @Value("${app.messaging.rabbit.enabled:false}") boolean rabbitEnabled,
                                @Value("${app.demo.enabled:false}") boolean demoMode,
                                @Value("${management.otlp.tracing.endpoint:}") String otlpEndpoint,
-                               @Value("${app.rate-limit.login-per-minute:10}") int loginLimit,
-                               @Value("${app.rate-limit.register-per-minute:5}") int registerLimit,
-                               @Value("${app.rate-limit.demo-login-per-minute:20}") int demoLoginLimit,
-                               @Value("${app.rate-limit.refresh-per-minute:30}") int refreshLimit,
-                               @Value("${app.rate-limit.api-per-minute:300}") int apiLimit) {
+                               RateLimitProperties rateLimits, Clock clock) {
         this.meters = meters;
         this.cacheManager = cacheManager;
         this.outboxRepository = outboxRepository;
         this.circuitBreakers = circuitBreakers;
         this.emailSender = emailSender;
+        this.clock = clock;
         this.redisEnabled = redisEnabled;
         this.rabbitEnabled = rabbitEnabled;
         this.demoMode = demoMode;
         this.tracingExport = !otlpEndpoint.isBlank();
         Map<String, Integer> l = new LinkedHashMap<>();
-        l.put("login", loginLimit);
-        l.put("register", registerLimit);
-        l.put("demo-login", demoLoginLimit);
-        l.put("refresh", refreshLimit);
-        l.put("api", apiLimit);
+        l.put("login", rateLimits.loginPerMinute());
+        l.put("register", rateLimits.registerPerMinute());
+        l.put("demo-login", rateLimits.demoLoginPerMinute());
+        l.put("refresh", rateLimits.refreshPerMinute());
+        l.put("api", rateLimits.apiPerMinute());
         this.limits = Collections.unmodifiableMap(l);
     }
 
     public Snapshot snapshot() {
-        return new Snapshot(Instant.now(), infrastructure(), http(), caches(), outbox(), rateLimits(), breakers(),
+        return new Snapshot(clock.instant(), infrastructure(), http(), caches(), outbox(), rateLimits(), breakers(),
                 List.of(operation("auth.login", "Logins"), operation("hold.create", "Seat holds")), jvm());
     }
 

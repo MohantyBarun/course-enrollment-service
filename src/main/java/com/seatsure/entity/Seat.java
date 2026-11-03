@@ -3,12 +3,10 @@ package com.seatsure.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 /** A physical seat in a screen. {@code gridCol} is its column in the drawn layout (aisles are skipped columns). */
 @Entity
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "seats")
 public class Seat {

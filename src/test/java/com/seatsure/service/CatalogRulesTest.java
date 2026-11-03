@@ -20,7 +20,7 @@ class CatalogRulesTest {
     @Test
     @DisplayName("aisles become empty grid columns; seat numbers stay consecutive")
     void layout_insertsAisleColumns() {
-        List<Seat> seats = AdminCatalogService.layoutSeats(null,
+        List<Seat> seats = VenueAdminService.layoutSeats(null,
                 List.of(new RowSpec("A", SeatCategory.CLASSIC, 8, List.of(2, 6))));
 
         assertThat(seats).extracting(Seat::getSeatNumber).containsExactly(1, 2, 3, 4, 5, 6, 7, 8);
@@ -30,7 +30,7 @@ class CatalogRulesTest {
 
     @Test
     void layout_rowsKeepTheirCategory() {
-        List<Seat> seats = AdminCatalogService.layoutSeats(null, List.of(
+        List<Seat> seats = VenueAdminService.layoutSeats(null, List.of(
                 new RowSpec("A", SeatCategory.CLASSIC, 2, null),
                 new RowSpec("B", SeatCategory.RECLINER, 2, List.of())));
 
@@ -40,7 +40,7 @@ class CatalogRulesTest {
 
     @Test
     void layout_aisleOutsideTheRow_isRejected() {
-        assertThatThrownBy(() -> AdminCatalogService.layoutSeats(null,
+        assertThatThrownBy(() -> VenueAdminService.layoutSeats(null,
                 List.of(new RowSpec("A", SeatCategory.CLASSIC, 6, List.of(6)))))
                 .isInstanceOf(BadRequestException.class);
     }

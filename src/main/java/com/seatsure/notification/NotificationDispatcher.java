@@ -79,17 +79,9 @@ public class NotificationDispatcher {
     }
 
     private void record(OutboxEvents.Message message, EmailMessage email, EmailSender.Delivery delivery) {
-        NotificationLog entry = new NotificationLog();
-        entry.setMessageId(message.id());
-        entry.setEventType(message.type());
-        entry.setRecipient(email.to());
-        entry.setSubject(email.subject());
-        String body = email.body();
-        entry.setBodyPreview(body.length() > 2000 ? body.substring(0, 2000) : body);
-        entry.setDelivery(delivery.sent() ? NotificationLog.Delivery.SENT : NotificationLog.Delivery.SKIPPED);
-        entry.setDetail(delivery.detail());
-        entry.setCreatedAt(clock.instant());
-        notificationLog.save(entry);
+        notificationLog.save(new NotificationLog(message.id(), message.type(), email.to(), email.subject(), email.body(),
+                delivery.sent() ? NotificationLog.Delivery.SENT : NotificationLog.Delivery.SKIPPED, delivery.detail(),
+                clock.instant()));
     }
 
     EmailMessage welcomeEmail(UserRegistered event) {

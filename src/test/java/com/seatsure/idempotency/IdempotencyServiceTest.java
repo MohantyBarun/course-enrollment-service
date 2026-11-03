@@ -41,14 +41,12 @@ class IdempotencyServiceTest {
     }
 
     private IdempotencyRecord existing(IdempotencyRecord.Status status, Duration age) {
-        IdempotencyRecord r = new IdempotencyRecord();
+        IdempotencyRecord r = IdempotencyRecord.inProgress("asha@x.com", "key-12345678", "hash", NOW.minus(age),
+                NOW.minus(age).plus(Duration.ofHours(24)));
         ReflectionTestUtils.setField(r, "id", 5L);
-        r.setOwner("asha@x.com");
-        r.setIdempotencyKey("key-12345678");
-        r.setRequestHash("hash");
-        r.setStatus(status);
-        r.setCreatedAt(NOW.minus(age));
-        r.setExpiresAt(NOW.minus(age).plus(Duration.ofHours(24)));
+        if (status == IdempotencyRecord.Status.COMPLETED) {
+            r.complete(201, secretBox.encrypt("{\"holdId\":1}"), null, null);
+        }
         when(repository.findByOwnerAndIdempotencyKey("asha@x.com", "key-12345678")).thenReturn(Optional.of(r));
         return r;
     }
@@ -93,9 +91,7 @@ class IdempotencyServiceTest {
 
     @Test
     void completed_isReplayed_evenWhenOld() {
-        IdempotencyRecord r = existing(IdempotencyRecord.Status.COMPLETED, Duration.ofHours(3));
-        r.setResponseStatus(201);
-        r.setResponseBody(secretBox.encrypt("{\"holdId\":1}"));
+        existing(IdempotencyRecord.Status.COMPLETED, Duration.ofHours(3));
 
         assertThat(claim("hash")).isEqualTo(new Claim.Replay(201, "{\"holdId\":1}", null, null));
     }

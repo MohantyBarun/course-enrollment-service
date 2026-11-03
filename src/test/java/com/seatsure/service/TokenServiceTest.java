@@ -83,7 +83,7 @@ class TokenServiceTest {
         UUID family = UUID.randomUUID();
         RefreshToken rotated = new RefreshToken(user, TokenService.hash("old"), family, Instant.now(),
                 Instant.now().plus(Duration.ofDays(1)));
-        rotated.setRevokedAt(Instant.now().minus(Duration.ofMinutes(1)));
+        rotated.revoke(Instant.now().minus(Duration.ofMinutes(1)));
         when(repository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(rotated));
 
         assertThatThrownBy(() -> tokens.rotate("old")).isInstanceOf(AuthenticationFailedException.class);
@@ -111,7 +111,7 @@ class TokenServiceTest {
 
     @Test
     void rotate_deactivatedUser_isRejected() {
-        user.setActive(false);
+        ReflectionTestUtils.setField(user, "active", false); // deactivated by support
         RefreshToken token = new RefreshToken(user, TokenService.hash("t"), UUID.randomUUID(), Instant.now(),
                 Instant.now().plus(Duration.ofDays(1)));
         when(repository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));

@@ -2,7 +2,7 @@ package com.seatsure.service;
 
 import com.seatsure.config.CacheConfig;
 import com.seatsure.dto.AdminDtos.*;
-import com.seatsure.dto.PagedResponseDTO;
+import com.seatsure.dto.PageView;
 import com.seatsure.entity.Booking;
 import com.seatsure.entity.Show;
 import com.seatsure.repository.BookingRepository;
@@ -86,8 +86,8 @@ public class DashboardService {
                 .toList();
     }
 
-    public PagedResponseDTO<AdminBookingView> recentBookings(int page, int size) {
-        return PagedResponseDTO.from(bookings.findRecent(PageRequest.of(page, size)).map(DashboardService::view));
+    public PageView<AdminBookingView> recentBookings(int page, int size) {
+        return PageView.from(bookings.findRecent(PageRequest.of(page, size)).map(DashboardService::view));
     }
 
     static AdminBookingView view(Booking b) {

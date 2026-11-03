@@ -1,17 +1,16 @@
 package com.seatsure.entity;
 
+import lombok.AccessLevel;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 
 /** The outcome of a request sent with an Idempotency-Key, replayed if the same request is retried. */
 @Entity
 @Getter
-@Setter
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "idempotency_keys",
         uniqueConstraints = @UniqueConstraint(name = "uk_idempotency_owner_key", columnNames = {"owner", "idempotency_key"}))
 public class IdempotencyRecord {
@@ -55,4 +54,25 @@ public class IdempotencyRecord {
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
+
+    /** A key just claimed by a request that is now running. */
+    public static IdempotencyRecord inProgress(String owner, String key, String requestHash, Instant now, Instant expiresAt) {
+        IdempotencyRecord r = new IdempotencyRecord();
+        r.owner = owner;
+        r.idempotencyKey = key;
+        r.requestHash = requestHash;
+        r.status = Status.IN_PROGRESS;
+        r.createdAt = now;
+        r.expiresAt = expiresAt;
+        return r;
+    }
+
+    /** The request finished: its response (body already encrypted) is replayed for retries. */
+    public void complete(int responseStatus, String encryptedBody, String contentType, String location) {
+        this.status = Status.COMPLETED;
+        this.responseStatus = responseStatus;
+        this.responseBody = encryptedBody;
+        this.responseContentType = contentType;
+        this.responseLocation = location;
+    }
 }

@@ -124,4 +124,17 @@ class PaymentWebhookIntegrationTest {
         assertThat(count("SELECT COUNT(*) FROM show_seats WHERE show_id = ? AND status = 'AVAILABLE'", show.showId()))
                 .isEqualTo(4);
     }
+
+    @Test
+    @DisplayName("a payment for the wrong amount is never confirmed: it's refunded and the seats stay on hold")
+    void wrongAmount_isRefundedNotBooked() {
+        Started started = startPayment(fixtures.show(1, 2), 1);
+        String ref = started.payment().gatewayRef();
+
+        payments.onSucceeded(ref, started.payment().amountPaise() + 100);
+
+        assertThat(count("SELECT COUNT(*) FROM payments WHERE gateway_ref = ? AND status = 'REFUNDED'", ref)).isEqualTo(1);
+        assertThat(count("SELECT COUNT(*) FROM seat_holds WHERE id = ? AND status = 'ACTIVE'", started.hold().holdId()))
+                .as("no booking: the customer can pay again while the hold lasts").isEqualTo(1);
+    }
 }

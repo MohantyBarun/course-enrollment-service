@@ -1,17 +1,18 @@
 package com.seatsure.entity;
 
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+import org.springframework.data.annotation.CreatedDate;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 @Getter
-@Setter
 @NoArgsConstructor
 @Table(name = "bookings")
 public class Booking implements OwnedByUser {
@@ -45,8 +46,9 @@ public class Booking implements OwnedByUser {
     @Column(name = "convenience_fee_paise", nullable = false)
     private int convenienceFeePaise;
 
+    @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt = Instant.now();
+    private Instant createdAt;
 
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
@@ -83,5 +85,11 @@ public class Booking implements OwnedByUser {
         this.status = BookingStatus.CANCELLED;
         this.cancelledAt = now;
         this.cancelReason = reason;
+    }
+
+    /** The payment that confirmed it, and the convenience fee charged on top of the tickets. */
+    public void paidWith(Payment payment, int convenienceFeePaise) {
+        this.payment = payment;
+        this.convenienceFeePaise = convenienceFeePaise;
     }
 }

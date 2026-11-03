@@ -18,7 +18,9 @@ import com.seatsure.entity.SeatCategory;
 import com.seatsure.entity.ShowFormat;
 import com.seatsure.repository.CityRepository;
 import com.seatsure.repository.SeatRepository;
-import com.seatsure.service.AdminCatalogService;
+import com.seatsure.service.MovieAdminService;
+import com.seatsure.service.ShowScheduleService;
+import com.seatsure.service.VenueAdminService;
 import com.seatsure.service.AuthService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestComponent;
@@ -42,7 +44,9 @@ public class TestFixtures {
     public static final int CLASSIC_PRICE = 20_000; // ₹200
     public static final String PASSWORD = "Secret#123";
 
-    @Autowired private AdminCatalogService admin;
+    @Autowired private MovieAdminService movieAdmin;
+    @Autowired private VenueAdminService venueAdmin;
+    @Autowired private ShowScheduleService showSchedule;
     @Autowired private AuthService auth;
     @Autowired private CityRepository cities;
     @Autowired private SeatRepository seats;
@@ -58,19 +62,19 @@ public class TestFixtures {
     }
 
     public Long movie(int minutes) {
-        return admin.createMovie(new MovieRequest(unique("Movie"), "A test movie.", minutes, "Hindi", Certificate.UA,
+        return movieAdmin.createMovie(new MovieRequest(unique("Movie"), "A test movie.", minutes, "Hindi", Certificate.UA,
                 List.of("Drama"), LocalDate.now().minusDays(1), null)).id();
     }
 
     /** A new cinema in Pune with one screen of {@code rows} x {@code seatsPerRow} Classic seats. */
     public Screen screen(int rows, int seatsPerRow) {
         Long cityId = cities.findByNameIgnoreCase("Pune").orElseThrow().getId();
-        Long cinemaId = admin.createCinema(new CinemaRequest(cityId, unique("Cinema"), "Test address")).id();
+        Long cinemaId = venueAdmin.createCinema(new CinemaRequest(cityId, unique("Cinema"), "Test address")).id();
         List<RowSpec> layout = new ArrayList<>();
         for (int r = 0; r < rows; r++) {
             layout.add(new RowSpec(String.valueOf((char) ('A' + r)), SeatCategory.CLASSIC, seatsPerRow, List.of()));
         }
-        Long screenId = admin.createScreen(cinemaId, new ScreenRequest("Audi 1", layout)).id();
+        Long screenId = venueAdmin.createScreen(cinemaId, new ScreenRequest("Audi 1", layout)).id();
         List<Long> seatIds = seats.findByScreenIdOrderByRowLabelAscGridColAsc(screenId).stream().map(Seat::getId).toList();
         return new Screen(cinemaId, screenId, seatIds);
     }
@@ -81,7 +85,7 @@ public class TestFixtures {
     }
 
     public Long show(Long movieId, Long screenId, Instant startsAt) {
-        return admin.createShow(new ShowRequest(movieId, screenId, startsAt, ShowFormat.TWO_D,
+        return showSchedule.createShow(new ShowRequest(movieId, screenId, startsAt, ShowFormat.TWO_D,
                 Map.of(SeatCategory.CLASSIC, CLASSIC_PRICE))).id();
     }
 
